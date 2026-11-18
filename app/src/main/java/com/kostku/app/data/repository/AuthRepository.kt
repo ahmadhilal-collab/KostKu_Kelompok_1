@@ -1,25 +1,25 @@
 package com.kostku.app.data.repository
 
 import com.kostku.app.BuildConfig
-import com.kostku.app.data.local.AdminDao
-import com.kostku.app.data.local.AdminEntity
-import com.kostku.app.data.local.RoomDao
-import com.kostku.app.data.local.Session
+import com.kostku.app.data.local.AppDatabase
 import com.kostku.app.data.local.SessionStore
-import com.kostku.app.data.local.TenantDao
 import com.kostku.app.data.local.UserRole
-import com.kostku.app.util.PasswordHasher
+import com.kostku.app.data.remote.ApiClient
+import com.kostku.app.data.remote.LoginAdminRequest
+import com.kostku.app.data.remote.LoginData
+import com.kostku.app.data.remote.LoginTenantRequest
+import com.kostku.app.data.remote.RegisterAdminRequest
+import com.kostku.app.data.remote.toSession
 import com.kostku.app.util.PhoneUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-class AuthException(message: String) : Exception(message)
-
+/** Login, daftar, dan logout lewat KostKu REST API. Token disimpan di SharedPreferences. */
 class AuthRepository(
-    private val adminDao: AdminDao,
-    private val tenantDao: TenantDao,
-    private val roomDao: RoomDao,
-    private val sessionStore: SessionStore
+    private val client: ApiClient,
+    private val sessionStore: SessionStore,
+    private val database: AppDatabase,
+    private val pushRepository: PushRepository
 ) {
 
     suspend fun registerAdmin(
@@ -28,46 +28,61 @@ class AuthRepository(
         password: String,
         secretCode: String
     ): Result<Unit> = runCatching {
-        if (secretCode.trim() != BuildConfig.ADMIN_SECRET_CODE) {
-            throw AuthException("Sandi rahasia tidak sesuai. Hubungi pengembang aplikasi untuk mendapatkannya.")
+        val data = client.call {
+            this.registerAdmin(
+                RegisterAdminRequest(
+                    name = name.trim(),
+                    phone = PhoneUtils.normalize(phone),
+                    password = password,
+                    secretCode = secretCode.trim()
+                )
+            )
         }
-        val normalizedPhone = PhoneUtils.normalize(phone)
-        if (adminDao.findByPhone(normalizedPhone) != null) {
-            throw AuthException("Nomor WhatsApp ini sudah terdaftar. Silakan masuk.")
-        }
-        val hash = withContext(Dispatchers.Default) { PasswordHasher.hash(password) }
-        val id = adminDao.insert(
-            AdminEntity(name = name.trim(), phone = normalizedPhone, passwordHash = hash)
-        )
-        sessionStore.save(Session(UserRole.ADMIN, id, name.trim()))
+        startSession(data)
     }
 
     suspend fun loginAdmin(identifier: String, password: String): Result<Unit> = runCatching {
-        val admin = adminDao.findByPhoneOrName(PhoneUtils.normalize(identifier), identifier.trim())
-        val valid = admin != null &&
-            withContext(Dispatchers.Default) { PasswordHasher.verify(password, admin.passwordHash) }
-        if (!valid || admin == null) {
-            throw AuthException("Nama/nomor HP atau kata sandi salah.")
-        }
-        sessionStore.save(Session(UserRole.ADMIN, admin.id, admin.name))
+        val data = client.call { this.loginAdmin(LoginAdminRequest(identifier.trim(), password)) }
+        startSession(data)
     }
 
     suspend fun loginTenant(name: String, nik: String, phone: String): Result<Unit> = runCatching {
-        val tenant = tenantDao.findActiveByNik(nik.trim())
-        val matches = tenant != null &&
-            tenant.name.trim().equals(name.trim(), ignoreCase = true) &&
-            PhoneUtils.normalize(tenant.phone) == PhoneUtils.normalize(phone)
-        if (!matches || tenant == null) {
-            throw AuthException("Data tidak cocok dengan data yang dicatat pengelola. Periksa nama, NIK, dan nomor HP Anda.")
+        val data = client.call {
+            this.loginTenant(LoginTenantRequest(name.trim(), nik.trim(), PhoneUtils.normalize(phone)))
         }
-        val room = roomDao.getById(tenant.roomId)
-        sessionStore.save(
-            Session(UserRole.TENANT, tenant.id, tenant.name, room?.let { "Kamar ${it.number}" })
-        )
+        startSession(data)
     }
 
-    suspend fun logout() = sessionStore.clear()
+    /** Logout: lepas HP dari notifikasi, cabut token di server (jika online), lalu hapus sesi dan data lokal. */
+    suspend fun logout() {
+        if (sessionStore.currentSession()?.role == UserRole.TENANT) {
+            pushRepository.unregisterDevice()
+        }
+        runCatching { client.callUnit { this.logout() } }
+        endSession()
+    }
 
-    /** Nomor WhatsApp pengelola (admin pertama) untuk tombol "Hubungi Pak Abbas". */
-    suspend fun ownerPhone(): String? = adminDao.getFirst()?.phone
+    /** Dipanggil juga saat server menjawab 401 (token kedaluwarsa/dicabut). */
+    suspend fun endSession() {
+        sessionStore.clear()
+        clearLocalData()
+    }
+
+    /**
+     * Nomor WhatsApp pengelola untuk tombol "Hubungi pengelola" di halaman login penghuni.
+     * Diambil dari server (nomor akun admin pertama); jika offline, pakai BuildConfig.OWNER_WHATSAPP.
+     */
+    suspend fun ownerPhone(): String? =
+        runCatching { client.call { this.contact() }.phone }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: BuildConfig.OWNER_WHATSAPP.takeIf { it.isNotBlank() }
+
+    private suspend fun startSession(data: LoginData) {
+        // Data milik akun sebelumnya (jika ada) dibuang supaya tidak tercampur.
+        clearLocalData()
+        sessionStore.save(data.user.toSession(), data.token, data.expiresAt)
+    }
+
+    private suspend fun clearLocalData() = withContext(Dispatchers.IO) {
+        database.clearAllTables()
+    }
 }

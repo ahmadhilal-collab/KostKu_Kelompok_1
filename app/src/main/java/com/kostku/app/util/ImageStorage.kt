@@ -47,3 +47,10 @@ object ImageStorage {
             }.getOrNull()
         }
 }
+
+/**
+ * Sumber gambar untuk Coil (AsyncImage): foto dari server berupa URL "https://...",
+ * sedangkan foto yang baru dipilih (belum diunggah) berupa path file di HP.
+ */
+fun photoModel(pathOrUrl: String): Any =
+    if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) pathOrUrl else File(pathOrUrl)

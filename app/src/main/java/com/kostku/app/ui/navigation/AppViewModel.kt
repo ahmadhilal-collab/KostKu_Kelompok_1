@@ -22,13 +22,33 @@ sealed interface SessionState {
 }
 
 class AppViewModel(
-    sessionStore: SessionStore,
+    private val sessionStore: SessionStore,
     private val authRepository: AuthRepository
 ) : ViewModel() {
 
     val session: StateFlow<SessionState> = sessionStore.session
         .map<Session?, SessionState> { if (it == null) SessionState.LoggedOut else SessionState.LoggedIn(it) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, SessionState.Loading)
+
+    val isWelcomeCompleted: StateFlow<Boolean?> = sessionStore.isWelcomeCompleted
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val isAdminTourCompleted: StateFlow<Boolean?> = sessionStore.isAdminTourCompleted
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val isTenantTourCompleted: StateFlow<Boolean?> = sessionStore.isTenantTourCompleted
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun completeWelcome() = sessionStore.setWelcomeCompleted(true)
+
+    fun completeAdminTour() = sessionStore.setAdminTourCompleted(true)
+
+    fun completeTenantTour() = sessionStore.setTenantTourCompleted(true)
+
+    fun resetTours() {
+        sessionStore.setAdminTourCompleted(false)
+        sessionStore.setTenantTourCompleted(false)
+    }
 
     fun logout() {
         viewModelScope.launch { authRepository.logout() }

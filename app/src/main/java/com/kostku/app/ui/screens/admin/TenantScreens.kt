@@ -38,6 +38,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -278,6 +279,8 @@ fun TenantAddScreen(vm: AdminViewModel, nav: NavHostController, presetRoomId: Lo
 fun TenantDetailScreen(tenantId: Long, vm: AdminViewModel, nav: NavHostController) {
     val tenant by remember(tenantId) { vm.observeTenant(tenantId) }.collectAsStateWithLifecycle(initialValue = null)
     val payments by remember(tenantId) { vm.observePayments(tenantId) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    // Ambil data penghuni + seluruh riwayat tagihannya dari server.
+    LaunchedEffect(tenantId) { vm.refreshTenant(tenantId) }
     val rooms by vm.roomCards.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val notify = LocalNotifier.current

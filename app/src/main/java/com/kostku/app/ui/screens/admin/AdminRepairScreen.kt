@@ -46,6 +46,7 @@ import com.kostku.app.ui.theme.Ink600
 import com.kostku.app.ui.theme.Ink900
 import com.kostku.app.ui.theme.White
 import com.kostku.app.util.Fmt
+import com.kostku.app.util.photoModel
 import java.io.File
 
 @Composable
@@ -89,7 +90,7 @@ fun AdminRepairScreen(vm: AdminViewModel) {
                 if (r.photoUri != null) {
                     Spacer(Modifier.height(10.dp))
                     AsyncImage(
-                        model = File(r.photoUri), contentDescription = "Foto kerusakan",
+                        model = photoModel(r.photoUri), contentDescription = "Foto kerusakan",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(12.dp))
                     )
@@ -98,7 +99,7 @@ fun AdminRepairScreen(vm: AdminViewModel) {
                     ReportStatus.SENT -> {
                         Spacer(Modifier.height(12.dp))
                         Button(
-                            onClick = { vm.updateReportStatus(r, ReportStatus.IN_PROGRESS); notify("Laporan ditandai diproses") },
+                            onClick = { vm.updateReportStatus(r, ReportStatus.IN_PROGRESS) },
                             shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(containerColor = Green700, contentColor = White)
                         ) { Text("Proses laporan") }
@@ -106,7 +107,7 @@ fun AdminRepairScreen(vm: AdminViewModel) {
                     ReportStatus.IN_PROGRESS -> {
                         Spacer(Modifier.height(12.dp))
                         Button(
-                            onClick = { vm.updateReportStatus(r, ReportStatus.DONE); notify("Laporan ditandai selesai") },
+                            onClick = { vm.updateReportStatus(r, ReportStatus.DONE) },
                             shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(containerColor = Green700, contentColor = White)
                         ) { Text("Tandai selesai") }

@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -53,6 +54,16 @@ interface RoomDao {
 
     @Query("SELECT COUNT(*) FROM rooms WHERE status = :status")
     fun observeCount(status: RoomStatus): Flow<Int>
+
+    // ---- Sinkronisasi dari API ----
+    @Upsert
+    suspend fun upsertAll(rooms: List<RoomEntity>)
+
+    @Upsert
+    suspend fun upsert(room: RoomEntity)
+
+    @Query("DELETE FROM rooms WHERE id NOT IN (:keepIds)")
+    suspend fun deleteAllExcept(keepIds: List<Long>)
 }
 
 @Dao
@@ -68,6 +79,16 @@ interface RoomPhotoDao {
 
     @Query("DELETE FROM room_photos WHERE id = :id")
     suspend fun delete(id: Long)
+
+    // ---- Sinkronisasi dari API ----
+    @Upsert
+    suspend fun upsertAll(photos: List<RoomPhotoEntity>)
+
+    @Query("DELETE FROM room_photos WHERE roomId = :roomId")
+    suspend fun deleteByRoom(roomId: Long)
+
+    @Query("SELECT COUNT(*) FROM room_photos WHERE roomId = :roomId")
+    suspend fun countByRoom(roomId: Long): Int
 }
 
 @Dao
@@ -101,6 +122,21 @@ interface TenantDao {
 
     @Query("SELECT * FROM tenants")
     fun observeAll(): Flow<List<TenantEntity>>
+
+    // ---- Sinkronisasi dari API ----
+    @Upsert
+    suspend fun upsertAll(tenants: List<TenantEntity>)
+
+    @Upsert
+    suspend fun upsert(tenant: TenantEntity)
+
+    /** Untuk data penghuni yang hanya diketahui sebagian: tidak menimpa data lengkap yang sudah ada. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfMissing(tenants: List<TenantEntity>)
+
+    /** Penghuni yang tidak lagi ada di daftar aktif server ditandai tidak aktif. */
+    @Query("UPDATE tenants SET active = 0 WHERE active = 1 AND id NOT IN (:activeIds)")
+    suspend fun deactivateAllExcept(activeIds: List<Long>)
 }
 
 @Dao
@@ -131,6 +167,19 @@ interface PaymentDao {
 
     @Query("SELECT * FROM payments WHERE tenantId = :tenantId ORDER BY periodYear DESC, periodMonth DESC")
     fun observeByTenant(tenantId: Long): Flow<List<PaymentEntity>>
+
+    // ---- Sinkronisasi dari API ----
+    @Upsert
+    suspend fun upsertAll(payments: List<PaymentEntity>)
+
+    @Upsert
+    suspend fun upsert(payment: PaymentEntity)
+
+    @Query("DELETE FROM payments WHERE periodYear = :year AND periodMonth = :month AND id NOT IN (:keepIds)")
+    suspend fun deletePeriodExcept(year: Int, month: Int, keepIds: List<Long>)
+
+    @Query("DELETE FROM payments WHERE tenantId = :tenantId AND id NOT IN (:keepIds)")
+    suspend fun deleteTenantExcept(tenantId: Long, keepIds: List<Long>)
 }
 
 @Dao
@@ -146,6 +195,13 @@ interface AnnouncementDao {
 
     @Query("DELETE FROM announcements WHERE id = :id")
     suspend fun delete(id: Long)
+
+    // ---- Sinkronisasi dari API ----
+    @Upsert
+    suspend fun upsertAll(list: List<AnnouncementEntity>)
+
+    @Query("DELETE FROM announcements WHERE id NOT IN (:keepIds)")
+    suspend fun deleteAllExcept(keepIds: List<Long>)
 }
 
 @Dao
@@ -161,4 +217,14 @@ interface RepairReportDao {
 
     @Query("SELECT * FROM repair_reports WHERE tenantId = :tenantId ORDER BY createdAt DESC")
     fun observeByTenant(tenantId: Long): Flow<List<RepairReportEntity>>
+
+    // ---- Sinkronisasi dari API ----
+    @Upsert
+    suspend fun upsertAll(reports: List<RepairReportEntity>)
+
+    @Upsert
+    suspend fun upsert(report: RepairReportEntity)
+
+    @Query("DELETE FROM repair_reports WHERE id NOT IN (:keepIds)")
+    suspend fun deleteAllExcept(keepIds: List<Long>)
 }

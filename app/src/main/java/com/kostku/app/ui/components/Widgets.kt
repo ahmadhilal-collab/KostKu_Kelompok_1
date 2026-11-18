@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -47,6 +49,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -171,13 +174,22 @@ fun AppCard(
     val inner: @Composable () -> Unit = { Column(Modifier.padding(16.dp), content = content) }
     if (onClick != null) {
         Surface(
-            onClick = onClick, modifier = modifier, shape = shape, color = containerColor,
-            border = BorderStroke(1.dp, Line), content = inner
+            onClick = onClick,
+            modifier = modifier,
+            shape = shape,
+            color = containerColor,
+            border = BorderStroke(1.dp, Line),
+            shadowElevation = 2.dp,
+            content = inner
         )
     } else {
         Surface(
-            modifier = modifier, shape = shape, color = containerColor,
-            border = BorderStroke(1.dp, Line), content = inner
+            modifier = modifier,
+            shape = shape,
+            color = containerColor,
+            border = BorderStroke(1.dp, Line),
+            shadowElevation = 2.dp,
+            content = inner
         )
     }
 }
@@ -324,29 +336,69 @@ data class BottomTab(
     val route: String,
     val label: String,
     val icon: ImageVector,
-    val selectedIcon: ImageVector = icon
+    val selectedIcon: ImageVector = icon,
+    /** Jika diisi, tab ini bisa disorot oleh panduan interaktif. */
+    val tourTarget: SpotlightTarget? = null
 )
 
 @Composable
 fun KostKuBottomBar(tabs: List<BottomTab>, currentRoute: String?, onSelect: (String) -> Unit) {
-    Column {
-        HorizontalDivider(color = Line)
-        NavigationBar(containerColor = White, tonalElevation = 0.dp) {
-            tabs.forEach { tab ->
-                val selected = currentRoute == tab.route
-                NavigationBarItem(
-                    selected = selected,
-                    onClick = { onSelect(tab.route) },
-                    icon = { Icon(if (selected) tab.selectedIcon else tab.icon, contentDescription = tab.label) },
-                    label = { Text(tab.label, style = MaterialTheme.typography.labelSmall) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Green700,
-                        selectedTextColor = Green700,
-                        indicatorColor = Green100,
-                        unselectedIconColor = Ink400,
-                        unselectedTextColor = Ink400
+    Surface(
+        color = White,
+        shadowElevation = 10.dp,
+        border = BorderStroke(1.dp, Line),
+        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+    ) {
+        Column {
+            NavigationBar(
+                containerColor = White,
+                tonalElevation = 0.dp,
+                windowInsets = WindowInsets(0, 0, 0, 0),
+                modifier = Modifier.height(68.dp)
+            ) {
+                tabs.forEach { tab ->
+                    val selected = currentRoute == tab.route
+                    val scale by androidx.compose.animation.core.animateFloatAsState(
+                        targetValue = if (selected) 1.12f else 1.0f,
+                        animationSpec = tween(180),
+                        label = "tabIconScale"
                     )
-                )
+                    NavigationBarItem(
+                        selected = selected,
+                        onClick = { onSelect(tab.route) },
+                        modifier = tab.tourTarget?.let { Modifier.tourTarget(it) } ?: Modifier,
+                        icon = {
+                            Icon(
+                                imageVector = if (selected) tab.selectedIcon else tab.icon,
+                                contentDescription = tab.label,
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .graphicsLayer {
+                                        scaleX = scale
+                                        scaleY = scale
+                                    }
+                            )
+                        },
+                        label = {
+                            Text(
+                                tab.label,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+                                )
+                            )
+                        },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Green700,
+                            selectedTextColor = Green700,
+                            indicatorColor = Green50,
+                            unselectedIconColor = Ink600,
+                            unselectedTextColor = Ink600
+                        )
+                    )
+                }
             }
         }
     }

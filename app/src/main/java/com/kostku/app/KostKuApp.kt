@@ -1,10 +1,10 @@
 package com.kostku.app
 
 import android.app.Application
+import com.kostku.app.push.PushNotifications
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 
 class KostKuApp : Application() {
     lateinit var container: AppContainer
@@ -14,7 +14,9 @@ class KostKuApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        container = AppContainer(this)
-        appScope.launch { container.seeder.seedIfEmpty() }
+        // Data tidak lagi diisi contoh di HP; semuanya diambil dari server KostKu API.
+        container = AppContainer(this, appScope)
+        // Saluran notifikasi Android 8+ (Tagihan, pengumuman, status laporan).
+        PushNotifications.createChannel(this)
     }
 }

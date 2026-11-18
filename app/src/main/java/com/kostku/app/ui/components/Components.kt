@@ -77,6 +77,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.kostku.app.R
+import com.kostku.app.ui.theme.AppBackground
 import com.kostku.app.ui.theme.Danger
 import com.kostku.app.ui.theme.DangerBg
 import com.kostku.app.ui.theme.Gold500
@@ -167,7 +168,7 @@ fun ScreenContainer(
     scrollable: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Box(Modifier.fillMaxSize().background(White)) {
+    Box(Modifier.fillMaxSize().background(AppBackground)) {
         DecorGlow()
         Column(
             modifier = modifier

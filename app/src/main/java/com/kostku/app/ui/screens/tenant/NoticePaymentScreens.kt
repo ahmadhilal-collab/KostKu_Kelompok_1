@@ -23,6 +23,8 @@ import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -32,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +50,7 @@ import androidx.navigation.NavHostController
 import com.kostku.app.data.local.PaymentEntity
 import com.kostku.app.data.local.PaymentStatus
 import com.kostku.app.data.local.Session
+import com.kostku.app.data.remote.InboxItem
 import com.kostku.app.ui.components.AppCard
 import com.kostku.app.ui.components.EmptyState
 import com.kostku.app.ui.components.FloorTabs
@@ -75,7 +79,11 @@ fun NoticeScreen(vm: TenantViewModel, session: Session, nav: NavHostController) 
     val payments by vm.payments.collectAsStateWithLifecycle()
     val announcements by vm.announcements.collectAsStateWithLifecycle()
     val room by vm.room.collectAsStateWithLifecycle()
+    val inbox by vm.notifications.collectAsStateWithLifecycle()
     var filter by rememberSaveable { mutableIntStateOf(0) } // 0 semua, 1 pengumuman, 2 pembayaran
+    // Titik "belum dibaca" tetap terlihat selama layar ini terbuka; ditandai dibaca saat ditinggalkan.
+    DisposableEffect(Unit) { onDispose { vm.markNotificationsRead() } }
+    val shownInbox = inbox.filter { !it.isAnnouncement && (filter == 0 || (filter == 2 && it.isPayment)) }.take(20)
 
     val current = payments.firstOrNull {
         it.periodYear == vm.period.year && it.periodMonth == vm.period.monthValue
@@ -105,8 +113,18 @@ fun NoticeScreen(vm: TenantViewModel, session: Session, nav: NavHostController) 
             if (filter != 1 && unpaid && current != null) {
                 item { ReminderCard(current, onOpen = { nav.navigate(TenantRoutes.PAYMENTS) }) }
             }
-            if (filter == 2 && !unpaid) {
+            if (filter == 2 && !unpaid && shownInbox.isEmpty()) {
                 item { EmptyState(Icons.Outlined.Payments, "Tidak ada tagihan tertunggak", "Pembayaran bulan ini sudah lunas. Terima kasih!") }
+            }
+            if (filter != 1 && shownInbox.isNotEmpty()) {
+                item {
+                    val unread = shownInbox.count { !it.read }
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        SectionLabel("Notifikasi terbaru", Modifier.weight(1f))
+                        if (unread > 0) Text("$unread belum dibaca", style = MaterialTheme.typography.labelMedium, color = Green700)
+                    }
+                }
+                items(shownInbox, key = { "n${it.id}" }) { n -> InboxCard(n) }
             }
             if (filter != 2) {
                 item {
@@ -139,6 +157,32 @@ fun NoticeScreen(vm: TenantViewModel, session: Session, nav: NavHostController) 
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun InboxCard(item: InboxItem) {
+    AppCard(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.Top) {
+            Icon(
+                when {
+                    item.isPayment -> Icons.Outlined.Payments
+                    item.isRepair -> Icons.Outlined.Build
+                    else -> Icons.Outlined.Notifications
+                },
+                null,
+                tint = if (item.type.startsWith("due:") || item.type == "payment_reminder") Warning else Green700,
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(item.title, style = MaterialTheme.typography.titleSmall, color = Ink900)
+                Text(Fmt.date(item.sentAt), style = MaterialTheme.typography.bodySmall, color = Ink400)
+            }
+            if (!item.read) Box(Modifier.padding(top = 6.dp).size(8.dp).background(Green700, CircleShape))
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(item.body, style = MaterialTheme.typography.bodyMedium, color = Ink600)
     }
 }
 

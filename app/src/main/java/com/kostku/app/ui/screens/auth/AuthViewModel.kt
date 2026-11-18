@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.kostku.app.KostKuApp
+import com.kostku.app.data.remote.ApiException
 import com.kostku.app.data.repository.AuthRepository
 import com.kostku.app.util.Validators
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -87,8 +88,15 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
             block()
                 .onSuccess { _ui.update { s -> s.copy(loading = false, success = true) } }
                 .onFailure { e ->
+                    // Pesan per kolom dari server (mis. "phone" → "Nomor sudah terdaftar.")
+                    val serverFieldErrors = (e as? ApiException)?.fieldErrors.orEmpty()
+                        .mapKeys { (key, _) -> if (key == "secret_code") AuthField.SECRET else key }
                     _ui.update { s ->
-                        s.copy(loading = false, error = e.message ?: "Terjadi kesalahan. Coba lagi.")
+                        s.copy(
+                            loading = false,
+                            error = e.message ?: "Terjadi kesalahan. Coba lagi.",
+                            fieldErrors = serverFieldErrors
+                        )
                     }
                 }
         }

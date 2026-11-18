@@ -15,7 +15,8 @@ import androidx.room.RoomDatabase
         AnnouncementEntity::class,
         RepairReportEntity::class
     ],
-    version = 1,
+    // Versi 2: database lokal kini hanya salinan (cache) dari server; data lama versi 1 dibuang.
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

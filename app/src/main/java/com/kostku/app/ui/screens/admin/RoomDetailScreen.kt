@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -88,6 +89,7 @@ import com.kostku.app.ui.theme.Line
 import com.kostku.app.ui.theme.White
 import com.kostku.app.util.Fmt
 import com.kostku.app.util.ImageStorage
+import com.kostku.app.util.photoModel
 import com.kostku.app.util.Intents
 import kotlinx.coroutines.launch
 import java.io.File
@@ -135,15 +137,15 @@ fun RoomDetailScreen(roomId: Long, vm: AdminViewModel, nav: NavHostController) {
                 Text("${photos.size} foto", style = MaterialTheme.typography.bodySmall, color = Ink600)
             }
             Spacer(Modifier.height(8.dp))
-            RoomPhotoPager(photos, pager, Modifier.fillMaxWidth().height(220.dp))
+            RoomPhotoPager(photos, pager, Modifier.fillMaxWidth().height(230.dp))
 
             if (photos.size > 1) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     itemsIndexed(photos, key = { _, p -> p.id }) { index, photo ->
                         val selected = pager.currentPage == index
                         AsyncImage(
-                            model = File(photo.uri), contentDescription = "Foto ${index + 1}",
+                            model = photoModel(photo.uri), contentDescription = "Foto ${index + 1}",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.size(72.dp, 54.dp).clip(RoundedCornerShape(10.dp))
                                 .border(if (selected) 2.dp else 0.dp, Green700, RoundedCornerShape(10.dp))
@@ -154,7 +156,7 @@ fun RoomDetailScreen(roomId: Long, vm: AdminViewModel, nav: NavHostController) {
             }
             if (photos.isNotEmpty()) {
                 TextButton(onClick = {
-                    photos.getOrNull(pager.currentPage)?.let { vm.deletePhoto(it.id); notify("Foto dihapus") }
+                    photos.getOrNull(pager.currentPage)?.let { vm.deletePhoto(it.id) }
                 }) { Text("Hapus foto ini", color = Danger, style = MaterialTheme.typography.labelMedium) }
             }
 
@@ -218,7 +220,32 @@ fun RoomDetailScreen(roomId: Long, vm: AdminViewModel, nav: NavHostController) {
                     }
                 }
             }
-            Spacer(Modifier.height(20.dp))
+
+            // Informasi Pembayaran (Card)
+            if (payment != null) {
+                Spacer(Modifier.height(12.dp))
+                AppCard(Modifier.fillMaxWidth()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Status Pembayaran (${Fmt.month(payment.periodYear, payment.periodMonth)})",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Ink900,
+                            modifier = Modifier.weight(1f)
+                        )
+                        PaymentStatusChip(paid)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        if (paid) "Lunas pada ${payment.paidAt?.let { Fmt.date(it) } ?: "-"}"
+                        else "Jatuh tempo ${Fmt.date(payment.dueDate)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Ink600
+                    )
+                }
+            }
+
+            // Spacer bawah agar konten tidak tertutup oleh Bottom Action Bar
+            Spacer(Modifier.height(84.dp))
         }
 
         // Aksi utama di bawah
@@ -258,9 +285,10 @@ fun RoomDetailScreen(roomId: Long, vm: AdminViewModel, nav: NavHostController) {
             roomNumber = room.number,
             onDismiss = { showUpload = false },
             onSave = { path, caption ->
-                vm.addPhoto(room.id, path, caption)
+                // Pesan "tersimpan" / gagal ditampilkan setelah unggahan ke server selesai.
+                vm.addPhoto(room.id, path, caption, room.number)
                 showUpload = false
-                notify("Foto kamar ${room.number} tersimpan")
+                notify("Mengunggah foto kamar ${room.number}…")
             }
         )
     }
@@ -294,54 +322,113 @@ private fun UploadPhotoDialog(roomNumber: Int, onDismiss: () -> Unit, onSave: (S
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var picked by remember { mutableStateOf<Uri?>(null) }
+    var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
     var caption by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) { picked = uri; error = null }
+    }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success && tempCameraUri != null) {
+            picked = tempCameraUri
+            error = null
+        }
+    }
+
+    fun launchCamera() {
+        runCatching {
+            val dir = File(context.cacheDir, "camera").apply { mkdirs() }
+            val tempFile = File(dir, "cam_${System.currentTimeMillis()}.jpg")
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                tempFile
+            )
+            tempCameraUri = uri
+            cameraLauncher.launch(uri)
+        }.onFailure {
+            error = "Gagal membuka kamera: ${it.message}"
+        }
     }
 
     Dialog(onDismissRequest = { if (!saving) onDismiss() }) {
         Surface(shape = RoundedCornerShape(24.dp), color = White) {
             Column(Modifier.padding(20.dp)) {
                 Text("Unggah Foto Kamar $roomNumber", style = MaterialTheme.typography.titleLarge, color = Ink900)
-                Spacer(Modifier.height(16.dp))
-                Box(
-                    Modifier.fillMaxWidth().height(150.dp)
-                        .dashedBorder(Green700.copy(alpha = 0.5f)).clip(RoundedCornerShape(16.dp))
-                        .clickable {
-                            launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    val uri = picked
-                    if (uri != null) {
+                Spacer(Modifier.height(14.dp))
+
+                val uri = picked
+                if (uri != null) {
+                    Box(
+                        Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(16.dp))
+                    ) {
                         AsyncImage(
                             model = uri, contentDescription = "Pratinjau foto",
                             contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
                         )
-                    } else {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Outlined.PhotoCamera, null, tint = Green700)
-                            Spacer(Modifier.height(6.dp))
-                            Text("Pilih foto dari Galeri HP", style = MaterialTheme.typography.labelLarge, color = Green700)
-                            Text(
-                                "JPG atau PNG • dikompres otomatis",
-                                style = MaterialTheme.typography.bodySmall, color = Ink400
-                            )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { picked = null }) {
+                            Text("Ganti Foto", color = Green700, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                } else {
+                    Text("Pilih Sumber Foto", style = MaterialTheme.typography.titleSmall, color = Ink900)
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            onClick = { launchCamera() },
+                            shape = RoundedCornerShape(14.dp),
+                            color = Green50,
+                            border = BorderStroke(1.dp, Line),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(Icons.Outlined.PhotoCamera, null, tint = Green700, modifier = Modifier.size(28.dp))
+                                Spacer(Modifier.height(6.dp))
+                                Text("Ambil Kamera", style = MaterialTheme.typography.labelMedium, color = Green700)
+                            }
+                        }
+                        Surface(
+                            onClick = {
+                                galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            color = Green50,
+                            border = BorderStroke(1.dp, Line),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(Icons.Outlined.PhotoLibrary, null, tint = Green700, modifier = Modifier.size(28.dp))
+                                Spacer(Modifier.height(6.dp))
+                                Text("Pilih Galeri", style = MaterialTheme.typography.labelMedium, color = Green700)
+                            }
                         }
                     }
                 }
-                Spacer(Modifier.height(16.dp))
+
+                Spacer(Modifier.height(14.dp))
                 KostKuTextField(
-                    label = "Keterangan Foto (misal: Kondisi Kamar Mandi)",
+                    label = "Keterangan Foto (opsional)",
                     value = caption, onValueChange = { caption = it },
-                    placeholder = "Masukkan keterangan foto", enabled = !saving
+                    placeholder = "Misal: Kondisi kamar mandi atau kasur", enabled = !saving
                 )
                 if (error != null) {
                     Text(error.orEmpty(), style = MaterialTheme.typography.bodySmall, color = Danger, modifier = Modifier.padding(top = 8.dp))
                 }
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedButton(
                         onClick = onDismiss, enabled = !saving,
@@ -350,13 +437,13 @@ private fun UploadPhotoDialog(roomNumber: Int, onDismiss: () -> Unit, onSave: (S
                     ) { Text("Batal", color = Green700) }
                     Button(
                         onClick = {
-                            val uri = picked
-                            if (uri == null) { error = "Pilih foto terlebih dahulu."; return@Button }
+                            val u = picked
+                            if (u == null) { error = "Pilih foto dari Kamera atau Galeri terlebih dahulu."; return@Button }
                             saving = true
                             scope.launch {
-                                val path = ImageStorage.importImage(context, uri, "room$roomNumber")
+                                val path = ImageStorage.importImage(context, u, "room$roomNumber")
                                 if (path == null) {
-                                    error = "Foto tidak dapat dibaca. Coba foto lain."
+                                    error = "Foto tidak dapat dibaca. Coba ambil/pilih foto lain."
                                     saving = false
                                 } else onSave(path, caption)
                             }

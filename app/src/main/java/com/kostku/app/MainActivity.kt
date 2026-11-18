@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.kostku.app.ui.components.TourHost
 import com.kostku.app.ui.navigation.AppNavHost
 import com.kostku.app.ui.theme.KostKuTheme
 
@@ -13,7 +14,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             KostKuTheme {
-                AppNavHost()
+                // TourHost menggambar panduan interaktif di atas seluruh layar aplikasi.
+                TourHost {
+                    AppNavHost()
+                }
             }
         }
     }

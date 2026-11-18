@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -40,6 +41,7 @@ import coil.compose.AsyncImage
 import com.kostku.app.data.local.Session
 import com.kostku.app.ui.components.AppCard
 import com.kostku.app.ui.components.DropdownField
+import com.kostku.app.ui.components.InitialsAvatar
 import com.kostku.app.ui.components.KostKuTextField
 import com.kostku.app.ui.components.LocalNotifier
 import com.kostku.app.ui.components.PageHeader
@@ -94,10 +96,12 @@ fun TenantRepairScreen(vm: TenantViewModel, session: Session) {
         val cat = category
         if (e.isNotEmpty() || cat == null) return
         sending = true
-        vm.submitReport(cat, description, photoPath) {
+        vm.submitReport(cat, description, photoPath) { result ->
             sending = false
-            category = null; description = ""; photoPath = null
-            notify("Laporan terkirim ke pengelola")
+            result.onSuccess {
+                category = null; description = ""; photoPath = null
+                notify("Laporan terkirim ke pengelola")
+            }.onFailure { notify(it.message ?: "Laporan gagal dikirim. Coba lagi.") }
         }
     }
 
@@ -106,18 +110,36 @@ fun TenantRepairScreen(vm: TenantViewModel, session: Session) {
     ) {
         PageHeader(
             "Lapor Kerusakan Fasilitas",
-            "${session.name} • Kamar ${room?.number ?: "-"}",
+            "Laporkan kendala fasilitas di kamar atau area kost Anda.",
             Modifier.entrance(0)
         )
+        Spacer(Modifier.height(16.dp))
+
+        // Profile Mini Card
+        AppCard(Modifier.fillMaxWidth().entrance(1)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                InitialsAvatar(session.name, size = 44.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(session.name, style = MaterialTheme.typography.titleSmall, color = Ink900)
+                    Text(
+                        "Kamar ${room?.number ?: "-"} • New Afra Kost",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Ink600
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(20.dp))
+
         DropdownField(
             label = "Kategori Kerusakan",
             value = category ?: "",
-            placeholder = "Pilih kategori",
+            placeholder = "Pilih kategori kerusakan",
             options = categories,
             onSelect = { category = categories[it]; errors = errors - "category" },
             error = errors["category"],
-            modifier = Modifier.entrance(1)
+            modifier = Modifier.entrance(2)
         )
         Text(
             "Pilihan: AC, Keran/Air, Listrik, Bangunan",

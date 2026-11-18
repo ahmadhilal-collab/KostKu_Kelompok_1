@@ -14,9 +14,16 @@ import com.kostku.app.data.local.ReportStatus
 import com.kostku.app.data.local.TenantEntity
 import com.kostku.app.data.repository.KostRepository
 import com.kostku.app.data.repository.ReceiptData
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -40,23 +47,69 @@ class AdminViewModel(
     val paidReceipts = repo.observePaidInfo().state(emptyList())
     val photosByRoom = repo.observeAllPhotos().map { list -> list.groupBy { it.roomId } }.state(emptyMap())
 
-    init {
-        viewModelScope.launch { repo.ensureBills(period) }
+    /** Pesan untuk snackbar (berhasil / gagal), ditampilkan oleh AdminShell. */
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val messages: SharedFlow<String> = _messages.asSharedFlow()
+
+    /** true saat sedang mengambil data dari server. */
+    private val _syncing = MutableStateFlow(false)
+    val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
+
+    private var syncJob: Job? = null
+    private var historyLoaded = false
+    /** Ada permintaan refresh saat sinkron lain sedang berjalan → jalankan sekali lagi sesudahnya. */
+    private var refreshAgain = false
+    /** Pesan gagal hanya ditampilkan sekali sampai sinkron berhasil lagi (tidak berulang tiap 30 detik). */
+    private var lastSyncOk = true
+
+    /**
+     * Ambil data terbaru dari server. Dipanggil AdminShell saat aplikasi tampil lalu tiap 30 detik,
+     * dan oleh ViewModel ini setelah setiap perubahan. Sinkron pertama juga mengambil tagihan semua
+     * periode untuk daftar nota.
+     */
+    fun refresh() {
+        if (syncJob?.isActive == true) {
+            refreshAgain = true
+            return
+        }
+        syncJob = viewModelScope.launch {
+            _syncing.value = true
+            try {
+                do {
+                    refreshAgain = false
+                    try {
+                        repo.syncAdmin(period, includeHistory = !historyLoaded)
+                        historyLoaded = true
+                        lastSyncOk = true
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        if (lastSyncOk) _messages.tryEmit(e.message ?: "Gagal memuat data dari server")
+                        lastSyncOk = false
+                    }
+                } while (refreshAgain)
+            } finally {
+                _syncing.value = false
+            }
+        }
     }
+
+    /** Hasil operasi tulis: jika berhasil, segarkan data supaya semua layar ikut terbarui. */
+    private fun <T> Result<T>.alsoRefresh(): Result<T> = onSuccess { refresh() }
+
+    fun refreshTenant(tenantId: Long) =
+        launchOp(successMessage = null, refreshAfter = false) { repo.syncTenant(tenantId) }
 
     fun observeTenant(id: Long): Flow<TenantEntity?> = repo.observeTenant(id)
     fun observePayments(tenantId: Long): Flow<List<PaymentEntity>> = repo.observePaymentsByTenant(tenantId)
 
-    fun addPhoto(roomId: Long, path: String, caption: String) {
-        viewModelScope.launch { repo.addPhoto(roomId, path, caption) }
-    }
+    fun addPhoto(roomId: Long, path: String, caption: String, roomNumber: Int) =
+        launchOp("Foto kamar $roomNumber tersimpan") { repo.addPhoto(roomId, path, caption) }
 
-    fun deletePhoto(id: Long) {
-        viewModelScope.launch { repo.deletePhoto(id) }
-    }
+    fun deletePhoto(id: Long) = launchOp("Foto dihapus") { repo.deletePhoto(id) }
 
     fun setMaintenance(roomId: Long, maintenance: Boolean, onResult: (Result<Unit>) -> Unit) {
-        viewModelScope.launch { onResult(repo.setRoomMaintenance(roomId, maintenance)) }
+        viewModelScope.launch { onResult(repo.setRoomMaintenance(roomId, maintenance).alsoRefresh()) }
     }
 
     fun addTenant(
@@ -71,31 +124,43 @@ class AdminViewModel(
     }
 
     fun confirmPayment(paymentId: Long, onResult: (Result<PaymentEntity>) -> Unit) {
-        viewModelScope.launch { onResult(repo.confirmCashPayment(paymentId, adminName)) }
+        viewModelScope.launch { onResult(repo.confirmCashPayment(paymentId, adminName).alsoRefresh()) }
     }
 
-    fun markReminderSent(paymentId: Long) {
-        viewModelScope.launch { repo.markReminderSent(paymentId) }
-    }
+    fun markReminderSent(paymentId: Long) = launchOp(successMessage = null) { repo.markReminderSent(paymentId) }
 
     fun publishAnnouncement(
-        title: String, body: String, target: AnnouncementTarget, publishedAt: Long, onDone: () -> Unit
+        title: String, body: String, target: AnnouncementTarget, publishedAt: Long,
+        onResult: (Result<Unit>) -> Unit
     ) {
         viewModelScope.launch {
-            repo.publishAnnouncement(title, body, target, publishedAt, adminName)
-            onDone()
+            onResult(runCatching { repo.publishAnnouncement(title, body, target, publishedAt) }.alsoRefresh())
         }
     }
 
-    fun deleteAnnouncement(id: Long) {
-        viewModelScope.launch { repo.deleteAnnouncement(id) }
-    }
+    fun deleteAnnouncement(id: Long) = launchOp("Pengumuman dihapus") { repo.deleteAnnouncement(id) }
 
-    fun updateReportStatus(report: RepairReportEntity, status: ReportStatus) {
-        viewModelScope.launch { repo.updateReportStatus(report, status) }
-    }
+    fun updateReportStatus(report: RepairReportEntity, status: ReportStatus) =
+        launchOp(if (status == ReportStatus.DONE) "Laporan ditandai selesai" else "Laporan ditandai diproses") {
+            repo.updateReportStatus(report, status)
+        }
 
     suspend fun loadReceipt(paymentId: Long): ReceiptData? = repo.buildReceipt(paymentId)
+
+    /** Menjalankan operasi ke server lalu menampilkan pesan berhasil/gagal di snackbar. */
+    private fun launchOp(successMessage: String?, refreshAfter: Boolean = true, block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                block()
+                successMessage?.let { _messages.tryEmit(it) }
+                if (refreshAfter) refresh()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit(e.message ?: "Terjadi kesalahan. Coba lagi.")
+            }
+        }
+    }
 
     companion object {
         fun factory(adminName: String): ViewModelProvider.Factory = viewModelFactory {

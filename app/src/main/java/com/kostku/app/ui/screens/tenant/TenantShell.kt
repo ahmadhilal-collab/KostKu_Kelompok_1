@@ -18,12 +18,24 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kostku.app.push.PushNotifications
+import com.kostku.app.ui.navigation.AppViewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -37,7 +49,8 @@ import com.kostku.app.ui.components.LocalNotifier
 import com.kostku.app.ui.components.navigateTab
 import com.kostku.app.ui.screens.common.ProfileInfoScreen
 import com.kostku.app.ui.screens.common.ReceiptScreen
-import com.kostku.app.ui.theme.White
+import com.kostku.app.ui.theme.AppBackground
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 object TenantRoutes {
@@ -71,13 +84,38 @@ fun TenantShell(session: Session, onLogout: () -> Unit) {
         }
         f
     }
+    // Pesan dari server (berhasil / gagal / tidak ada internet) → snackbar
+    LaunchedEffect(vm) { vm.messages.collect { notify(it) } }
+    // Ambil data terbaru dari server saat aplikasi tampil, lalu tiap 30 detik selama tetap tampil.
+    // Berhenti otomatis saat aplikasi di latar belakang (hemat baterai & kuota).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(vm, lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                vm.refresh()
+                delay(30_000)
+            }
+        }
+    }
+    // Android 13+: minta izin notifikasi SETELAH panduan selesai (supaya tidak menumpuk dengan panduan).
+    val appViewModel: AppViewModel = viewModel(factory = AppViewModel.Factory)
+    val tourDone by appViewModel.isTenantTourCompleted.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) notify("Notifikasi dimatikan. Aktifkan di Pengaturan HP agar tidak melewatkan tagihan.")
+    }
+    LaunchedEffect(tourDone) {
+        if (tourDone == true && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !PushNotifications.canPost(context)) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val showBar = tenantTabs.any { it.route == route }
 
     CompositionLocalProvider(LocalNotifier provides notify) {
         Scaffold(
-            containerColor = White,
+            containerColor = AppBackground,
             snackbarHost = { SnackbarHost(snackbar) },
             bottomBar = {
                 if (showBar) KostKuBottomBar(tenantTabs, route) { nav.navigateTab(it, TenantRoutes.HOME) }
@@ -95,7 +133,12 @@ fun TenantShell(session: Session, onLogout: () -> Unit) {
                 composable(TenantRoutes.HOME) { TenantHomeScreen(vm, session, nav) }
                 composable(TenantRoutes.REPAIR) { TenantRepairScreen(vm, session) }
                 composable(TenantRoutes.PROFILE) {
-                    ProfileInfoScreen(session = session, roleLabel = "Penghuni", onLogout = onLogout)
+                    ProfileInfoScreen(
+                        session = session,
+                        roleLabel = "Penghuni",
+                        onLogout = onLogout,
+                        onReplayTour = { nav.navigateTab(TenantRoutes.HOME, TenantRoutes.HOME) }
+                    )
                 }
                 composable(TenantRoutes.NOTICE) { NoticeScreen(vm, session, nav) }
                 composable(TenantRoutes.PAYMENTS) { PaymentsScreen(vm, session, nav) }

@@ -50,6 +50,7 @@ fun AppNavHost() {
     val navController = rememberNavController()
     val appViewModel: AppViewModel = viewModel(factory = AppViewModel.Factory)
     val sessionState by appViewModel.session.collectAsStateWithLifecycle()
+    val isWelcomeCompleted by appViewModel.isWelcomeCompleted.collectAsStateWithLifecycle()
 
     // Jika sesi berakhir (logout) saat berada di beranda, kembali ke pilihan peran.
     LaunchedEffect(sessionState) {
@@ -78,6 +79,10 @@ fun AppNavHost() {
                     val state = sessionState
                     if (state is SessionState.LoggedIn) {
                         navController.goHomeClearingAll(state.session.role)
+                    } else if (isWelcomeCompleted == true) {
+                        navController.navigate(Routes.ROLE) {
+                            popUpTo(Routes.SPLASH) { inclusive = true }
+                        }
                     } else {
                         navController.navigate(Routes.ONBOARDING) {
                             popUpTo(Routes.SPLASH) { inclusive = true }
@@ -87,7 +92,10 @@ fun AppNavHost() {
             )
         }
         composable(Routes.ONBOARDING) {
-            OnboardingScreen(onStart = { navController.navigate(Routes.ROLE) })
+            OnboardingScreen(onStart = {
+                appViewModel.completeWelcome()
+                navController.navigate(Routes.ROLE)
+            })
         }
         composable(Routes.ROLE) {
             RoleSelectScreen(

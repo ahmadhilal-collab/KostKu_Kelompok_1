@@ -124,7 +124,7 @@ fun AnnouncementListScreen(vm: AdminViewModel, nav: NavHostController) {
             text = { Text("\"${a.title}\" tidak akan tampil lagi di halaman penghuni.") },
             confirmButton = {
                 TextButton(onClick = {
-                    vm.deleteAnnouncement(a.id); toDelete = null; notify("Pengumuman dihapus")
+                    vm.deleteAnnouncement(a.id); toDelete = null
                 }) { Text("Hapus", color = Danger) }
             },
             dismissButton = { TextButton(onClick = { toDelete = null }) { Text("Batal", color = Ink600) } }
@@ -154,10 +154,12 @@ fun AnnouncementCreateScreen(vm: AdminViewModel, nav: NavHostController) {
         // Jika tanggal terbit hari ini, terbitkan sekarang; selain itu pukul 00.00 hari tersebut.
         val publishedAt = if (date == LocalDate.now()) System.currentTimeMillis()
         else Fmt.startOfDayMillis(date.atTime(LocalTime.MIN).toLocalDate())
-        vm.publishAnnouncement(title, body, targets[targetIndex], publishedAt) {
+        vm.publishAnnouncement(title, body, targets[targetIndex], publishedAt) { result ->
             saving = false
-            notify("Pengumuman diterbitkan")
-            nav.popBackStack()
+            result.onSuccess {
+                notify("Pengumuman diterbitkan")
+                nav.popBackStack()
+            }.onFailure { notify(it.message ?: "Gagal menerbitkan pengumuman") }
         }
     }
 
