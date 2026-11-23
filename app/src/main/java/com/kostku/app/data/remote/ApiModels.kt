@@ -265,12 +265,17 @@ data class DeviceRequest(
 
 data class NotificationDto(
     @SerializedName("id") val id: Long,
-    /** payment_paid | payment_reminder | repair_status | due:<id>:<tahap> | announcement:<id> */
+    /**
+     * Penghuni: payment_paid | payment_reminder | payment_rejected | repair_status | due:<id>:<tahap> | announcement:<id>
+     * Admin: transfer_submitted | repair_new
+     */
     @SerializedName("type") val type: String,
     @SerializedName("title") val title: String,
     @SerializedName("body") val body: String,
     @SerializedName("sent_at") val sentAt: String?,
-    @SerializedName("read") val read: Boolean
+    @SerializedName("read") val read: Boolean,
+    /** Admin: id tagihan (transfer_submitted) atau id laporan (repair_new). */
+    @SerializedName("ref_id") val refId: Long? = null
 )
 
 /** GET /notifications */

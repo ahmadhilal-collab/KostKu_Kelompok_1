@@ -34,6 +34,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kostku.app.push.PushNavigation
 import com.kostku.app.push.PushNotifications
 import com.kostku.app.ui.navigation.AppViewModel
 import androidx.navigation.NavType
@@ -115,6 +116,22 @@ fun TenantShell(session: Session, onLogout: () -> Unit) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
+    // Notifikasi HP diketuk → buka layar yang sesuai (tagihan, perbaikan, pengumuman, profil).
+    val pushTarget by PushNavigation.target.collectAsStateWithLifecycle()
+    LaunchedEffect(pushTarget) {
+        val target = pushTarget ?: return@LaunchedEffect
+        PushNavigation.consume()
+        if (target.scope != "tenant") return@LaunchedEffect
+        vm.refresh()
+        val t = target.type
+        when {
+            t.startsWith("payment") || t.startsWith("due:") -> nav.navigate(TenantRoutes.PAYMENTS) { launchSingleTop = true }
+            t.startsWith("repair") -> nav.navigateTab(TenantRoutes.REPAIR, TenantRoutes.HOME)
+            t.startsWith("announcement") -> nav.navigate(TenantRoutes.NOTICE) { launchSingleTop = true }
+            t.startsWith("profile") -> nav.navigateTab(TenantRoutes.PROFILE, TenantRoutes.HOME)
+        }
+    }
+
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val showBar = tenantTabs.any { it.route == route }

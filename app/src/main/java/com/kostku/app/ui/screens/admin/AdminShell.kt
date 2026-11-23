@@ -1,5 +1,9 @@
 package com.kostku.app.ui.screens.admin
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -25,7 +29,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -36,6 +42,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.kostku.app.data.local.Session
+import com.kostku.app.push.PushNavigation
+import com.kostku.app.push.PushNotifications
+import com.kostku.app.ui.navigation.AppViewModel
 import com.kostku.app.ui.components.BottomTab
 import com.kostku.app.ui.components.KostKuBottomBar
 import com.kostku.app.ui.components.LocalNotifier
@@ -67,6 +76,7 @@ object AdminRoutes {
     const val TRANSFER = "a_transfer/{id}"
     const val PAYMENT_SETTINGS = "a_payment_settings"
     const val TENANT_EDIT = "a_tenant_edit/{id}"
+    const val NOTIFICATIONS = "a_notifications"
 
     fun room(id: Long) = "a_room/$id"
     fun tenant(id: Long) = "a_tenant/$id"
@@ -115,6 +125,42 @@ fun AdminShell(session: Session, onLogout: () -> Unit) {
             }
         }
     }
+    // Android 13+: minta izin notifikasi supaya HP admin bisa menerima push bukti transfer & laporan.
+    val context = LocalContext.current
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) notify("Notifikasi dimatikan. Aktifkan di Pengaturan HP agar tidak melewatkan bukti transfer & laporan.")
+    }
+    val appViewModel: AppViewModel = viewModel(factory = AppViewModel.Factory)
+    val tourDone by appViewModel.isAdminTourCompleted.collectAsStateWithLifecycle()
+    LaunchedEffect(tourDone) {
+        if (tourDone == true && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !PushNotifications.canPost(context)) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    /** Buka layar yang dirujuk notifikasi admin (dari kotak masuk maupun dari notifikasi HP). */
+    fun openNotification(type: String, refId: Long?) {
+        when {
+            type.startsWith("transfer") && refId != null -> nav.navigate(AdminRoutes.transfer(refId))
+            type.startsWith("repair") -> {
+                vm.focusReport(refId)
+                nav.navigateTab(AdminRoutes.REPAIRS, AdminRoutes.HOME)
+            }
+            else -> nav.navigate(AdminRoutes.NOTIFICATIONS)
+        }
+    }
+
+    // Notifikasi HP diketuk → muat data terbaru lalu buka layar terkait.
+    val pushTarget by PushNavigation.target.collectAsStateWithLifecycle()
+    LaunchedEffect(pushTarget) {
+        val target = pushTarget ?: return@LaunchedEffect
+        PushNavigation.consume()
+        if (target.scope != "admin") return@LaunchedEffect
+        vm.refresh()
+        target.notificationId?.let { vm.markNotificationRead(it) }
+        openNotification(target.type, target.refId)
+    }
+
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val showBar = adminTabs.any { it.route == route }
@@ -177,6 +223,9 @@ fun AdminShell(session: Session, onLogout: () -> Unit) {
                     arguments = listOf(navArgument("id") { type = NavType.LongType })
                 ) { TransferVerifyScreen(it.arguments?.getLong("id") ?: -1L, vm, nav) }
                 composable(AdminRoutes.PAYMENT_SETTINGS) { PaymentSettingsScreen(vm, nav) }
+                composable(AdminRoutes.NOTIFICATIONS) {
+                    AdminNotificationScreen(vm, nav) { n -> openNotification(n.type, n.refId) }
+                }
                 composable(
                     AdminRoutes.TENANT_EDIT,
                     arguments = listOf(navArgument("id") { type = NavType.LongType })

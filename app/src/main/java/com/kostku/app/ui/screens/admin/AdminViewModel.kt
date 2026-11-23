@@ -12,8 +12,10 @@ import com.kostku.app.data.local.PaymentStatus
 import com.kostku.app.data.local.RepairReportEntity
 import com.kostku.app.data.local.ReportStatus
 import com.kostku.app.data.local.TenantEntity
+import com.kostku.app.data.remote.InboxItem
 import com.kostku.app.data.remote.PaymentSettings
 import com.kostku.app.data.repository.KostRepository
+import com.kostku.app.data.repository.PushRepository
 import com.kostku.app.data.repository.ReceiptData
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -32,6 +34,7 @@ import java.time.YearMonth
 
 class AdminViewModel(
     private val repo: KostRepository,
+    private val push: PushRepository,
     val adminName: String
 ) : ViewModel() {
 
@@ -66,12 +69,28 @@ class AdminViewModel(
     private val _syncing = MutableStateFlow(false)
     val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
 
+    // ---- Notifikasi admin (bukti transfer masuk, laporan perbaikan baru) ----
+    private val _inbox = MutableStateFlow<List<InboxItem>>(emptyList())
+    val inbox: StateFlow<List<InboxItem>> = _inbox.asStateFlow()
+    val unreadCount: StateFlow<Int> = inbox.map { list -> list.count { !it.read } }.state(0)
+
+    /** Laporan yang dibuka dari notifikasi → disorot di layar Perbaikan. */
+    private val _focusReport = MutableStateFlow<Long?>(null)
+    val focusReport: StateFlow<Long?> = _focusReport.asStateFlow()
+
     private var syncJob: Job? = null
     private var historyLoaded = false
     /** Ada permintaan refresh saat sinkron lain sedang berjalan → jalankan sekali lagi sesudahnya. */
     private var refreshAgain = false
     /** Pesan gagal hanya ditampilkan sekali sampai sinkron berhasil lagi (tidak berulang tiap 30 detik). */
     private var lastSyncOk = true
+
+    init {
+        // Daftarkan HP admin supaya menerima push (setiap aplikasi dibuka; aman diulang).
+        viewModelScope.launch { runCatching { push.registerDevice() } }
+        // Ada push masuk saat aplikasi terbuka → langsung muat data & notifikasi terbaru.
+        viewModelScope.launch { push.received.collect { refresh() } }
+    }
 
     /**
      * Ambil data terbaru dari server. Dipanggil AdminShell saat aplikasi tampil lalu tiap 30 detik,
@@ -92,6 +111,7 @@ class AdminViewModel(
                         repo.syncAdmin(period, includeHistory = !historyLoaded)
                         historyLoaded = true
                         lastSyncOk = true
+                        loadInboxQuietly()
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -160,6 +180,31 @@ class AdminViewModel(
         viewModelScope.launch { onResult(repo.updateTenant(tenantId, name, nik, phone, entryDate, rate).alsoRefresh()) }
     }
 
+    private suspend fun loadInboxQuietly() {
+        runCatching { repo.fetchNotifications() }.onSuccess { _inbox.value = it }
+    }
+
+    fun loadInbox() {
+        viewModelScope.launch { loadInboxQuietly() }
+    }
+
+    /** Tandai satu notifikasi dibaca (langsung di layar, lalu ke server). */
+    fun markNotificationRead(id: Long) {
+        if (_inbox.value.none { it.id == id && !it.read } && _inbox.value.isNotEmpty()) return
+        _inbox.value = _inbox.value.map { if (it.id == id) it.copy(read = true) else it }
+        viewModelScope.launch { runCatching { repo.markNotificationRead(id) } }
+    }
+
+    fun markAllNotificationsRead() {
+        if (_inbox.value.none { !it.read }) return
+        _inbox.value = _inbox.value.map { it.copy(read = true) }
+        viewModelScope.launch { runCatching { repo.markAllNotificationsRead() } }
+    }
+
+    fun focusReport(id: Long?) {
+        _focusReport.value = id
+    }
+
     fun proofUrl(payment: PaymentEntity): String = repo.proofUrl(payment)
     fun authHeader(): String? = repo.authHeader()
 
@@ -202,7 +247,7 @@ class AdminViewModel(
         fun factory(adminName: String): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as KostKuApp
-                AdminViewModel(app.container.kostRepository, adminName)
+                AdminViewModel(app.container.kostRepository, app.container.pushRepository, adminName)
             }
         }
     }

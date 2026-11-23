@@ -27,7 +27,7 @@ object PushNotifications {
             "Notifikasi KostKu",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "Tagihan & jatuh tempo, pengumuman pengelola, dan status laporan perbaikan"
+            description = "Tagihan, bukti transfer, pengumuman, dan laporan perbaikan"
         }
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
@@ -42,12 +42,19 @@ object PushNotifications {
      * Android menampilkannya sendiri memakai channel & ikon dari AndroidManifest.)
      */
     @SuppressLint("MissingPermission") // izin sudah diperiksa lewat canPost()
-    fun show(context: Context, title: String, body: String, id: Int) {
+    fun show(context: Context, title: String, body: String, id: Int, data: Map<String, String> = emptyMap()) {
         if (!canPost(context)) return
+        // Data FCM (type, scope, ref_id, notification_id) ikut dibawa supaya ketukan membuka layar terkait.
+        val intent = Intent(context, MainActivity::class.java).addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        )
+        for (key in listOf(PushNavigation.EXTRA_TYPE, PushNavigation.EXTRA_SCOPE, PushNavigation.EXTRA_REF_ID, PushNavigation.EXTRA_NOTIFICATION_ID)) {
+            data[key]?.let { intent.putExtra(key, it) }
+        }
         val openApp = PendingIntent.getActivity(
             context,
-            0,
-            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            id, // tiap notifikasi punya PendingIntent sendiri (extras tidak saling menimpa)
+            intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)

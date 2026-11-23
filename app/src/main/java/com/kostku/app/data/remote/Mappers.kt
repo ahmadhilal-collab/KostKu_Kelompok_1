@@ -186,11 +186,13 @@ data class InboxItem(
     val title: String,
     val body: String,
     val sentAt: Long,
-    val read: Boolean
+    val read: Boolean,
+    /** Admin: id tagihan / laporan yang dirujuk notifikasi. */
+    val refId: Long? = null
 ) {
     /** Notifikasi pengumuman sudah tampil sebagai kartu pengumuman, jadi tidak ditampilkan dua kali. */
     val isAnnouncement: Boolean get() = type.startsWith("announcement")
-    val isPayment: Boolean get() = type.startsWith("payment") || type.startsWith("due:")
+    val isPayment: Boolean get() = type.startsWith("payment") || type.startsWith("due:") || type.startsWith("transfer")
     val isRepair: Boolean get() = type.startsWith("repair")
 }
 
@@ -200,7 +202,8 @@ fun NotificationDto.toItem(): InboxItem = InboxItem(
     title = title,
     body = body,
     sentAt = ApiDates.isoToMillis(sentAt) ?: 0L,
-    read = read
+    read = read,
+    refId = refId?.takeIf { it > 0 }
 )
 
 /** RoomStatus/AnnouncementTarget/ReportStatus → teks yang diharapkan server (huruf kecil). */

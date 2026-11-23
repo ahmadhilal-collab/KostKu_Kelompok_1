@@ -15,7 +15,7 @@ import kotlin.coroutines.resumeWithException
 class PushRepository(private val client: ApiClient) {
 
     private val _received = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
-    /** Berbunyi setiap ada push masuk saat aplikasi terbuka → layar penghuni memuat ulang data. */
+    /** Berbunyi setiap ada push masuk saat aplikasi terbuka → layar admin/penghuni memuat ulang data. */
     val received: SharedFlow<Unit> = _received.asSharedFlow()
 
     fun notifyReceived() {
@@ -26,7 +26,7 @@ class PushRepository(private val client: ApiClient) {
     suspend fun currentToken(): String? =
         runCatching { FirebaseMessaging.getInstance().token.await() }.getOrNull()?.takeIf { it.isNotBlank() }
 
-    /** Penghuni: daftarkan HP ini supaya menerima notifikasi. Aman dipanggil berulang. */
+    /** Admin/penghuni: daftarkan HP ini supaya menerima notifikasi akun yang login. Aman dipanggil berulang. */
     suspend fun registerDevice(token: String? = null) {
         val fcmToken = token ?: currentToken() ?: return
         client.callUnit { this.registerDevice(DeviceRequest(fcmToken, "android")) }

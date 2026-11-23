@@ -184,4 +184,7 @@ interface KostKuApi {
 
     @POST("notifications/read-all")
     suspend fun readAllNotifications(): Response<ApiEnvelope<JsonElement>>
+
+    @POST("notifications/{id}/read")
+    suspend fun readNotification(@Path("id") id: Long): Response<ApiEnvelope<JsonElement>>
 }

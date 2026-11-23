@@ -11,8 +11,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Build
@@ -22,6 +25,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -40,6 +45,7 @@ import com.kostku.app.ui.components.FloorTabs
 import com.kostku.app.ui.components.LocalNotifier
 import com.kostku.app.ui.components.PageHeader
 import com.kostku.app.ui.components.ReportStatusChip
+import com.kostku.app.ui.theme.Green50
 import com.kostku.app.ui.theme.Green700
 import com.kostku.app.ui.theme.Ink400
 import com.kostku.app.ui.theme.Ink600
@@ -57,8 +63,20 @@ fun AdminRepairScreen(vm: AdminViewModel) {
     val statuses = listOf(null, ReportStatus.SENT, ReportStatus.IN_PROGRESS, ReportStatus.DONE)
     val shown = reports.filter { statuses[filter] == null || it.report.status == statuses[filter] }
 
+    // Dibuka dari notifikasi "Laporan perbaikan baru" → tampilkan semua, gulung ke laporan itu, dan sorot.
+    val focus by vm.focusReport.collectAsStateWithLifecycle()
+    val listState = rememberLazyListState()
+    LaunchedEffect(focus, reports.size) {
+        val id = focus ?: return@LaunchedEffect
+        filter = 0
+        val index = reports.indexOfFirst { it.report.id == id }
+        if (index >= 0) listState.animateScrollToItem(index + 1) // +1: item judul
+    }
+    DisposableEffect(Unit) { onDispose { vm.focusReport(null) } }
+
     LazyColumn(
         Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -74,7 +92,12 @@ fun AdminRepairScreen(vm: AdminViewModel) {
         }
         items(shown, key = { it.report.id }) { info ->
             val r = info.report
-            AppCard(Modifier.fillMaxWidth()) {
+            val highlighted = r.id == focus
+            AppCard(
+                if (highlighted) Modifier.fillMaxWidth().border(BorderStroke(2.dp, Green700), RoundedCornerShape(18.dp))
+                else Modifier.fillMaxWidth(),
+                containerColor = if (highlighted) Green50 else White
+            ) {
                 Row(verticalAlignment = Alignment.Top) {
                     Column(Modifier.weight(1f)) {
                         Text(r.category, style = MaterialTheme.typography.titleSmall, color = Ink900)

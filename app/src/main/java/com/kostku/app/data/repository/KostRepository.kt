@@ -533,7 +533,7 @@ class KostRepository(
     }
 
     // =====================================================================
-    //  Kotak masuk notifikasi penghuni (Tahap H)
+    //  Kotak masuk notifikasi (penghuni & admin — server memilih sesuai akun yang login)
     // =====================================================================
 
     suspend fun fetchNotifications(): List<InboxItem> =
@@ -541,6 +541,10 @@ class KostRepository(
 
     suspend fun markAllNotificationsRead() {
         client.callUnit { this.readAllNotifications() }
+    }
+
+    suspend fun markNotificationRead(id: Long) {
+        client.callUnit { this.readNotification(id) }
     }
 
     companion object {

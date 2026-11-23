@@ -3,7 +3,6 @@ package com.kostku.app.data.repository
 import com.kostku.app.BuildConfig
 import com.kostku.app.data.local.AppDatabase
 import com.kostku.app.data.local.SessionStore
-import com.kostku.app.data.local.UserRole
 import com.kostku.app.data.remote.ApiClient
 import com.kostku.app.data.remote.LoginAdminRequest
 import com.kostku.app.data.remote.LoginData
@@ -55,8 +54,8 @@ class AuthRepository(
 
     /** Logout: lepas HP dari notifikasi, cabut token di server (jika online), lalu hapus sesi dan data lokal. */
     suspend fun logout() {
-        if (sessionStore.currentSession()?.role == UserRole.TENANT) {
-            pushRepository.unregisterDevice()
+        if (sessionStore.currentSession() != null) {
+            pushRepository.unregisterDevice() // admin maupun penghuni
         }
         runCatching { client.callUnit { this.logout() } }
         endSession()

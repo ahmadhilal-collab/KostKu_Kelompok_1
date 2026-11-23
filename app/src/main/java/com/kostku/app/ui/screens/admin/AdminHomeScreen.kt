@@ -99,6 +99,7 @@ fun AdminHomeScreen(
 ) {
     val cards by vm.roomCards.collectAsStateWithLifecycle()
     val pendingTransfers by vm.pendingTransfers.collectAsStateWithLifecycle()
+    val unreadNotifications by vm.unreadCount.collectAsStateWithLifecycle()
     val isAdminTourCompleted by appViewModel.isAdminTourCompleted.collectAsStateWithLifecycle()
     val tour = LocalTourController.current
     val gridState = rememberLazyGridState()
@@ -208,6 +209,7 @@ fun AdminHomeScreen(
                                 )
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                NotificationBell(unreadNotifications, White) { nav.navigate(AdminRoutes.NOTIFICATIONS) }
                                 IconButton(onClick = { showTour = true }) {
                                     Icon(Icons.Outlined.HelpOutline, contentDescription = "Panduan Aplikasi", tint = White)
                                 }
