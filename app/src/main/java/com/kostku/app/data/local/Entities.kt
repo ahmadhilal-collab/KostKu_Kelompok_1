@@ -7,6 +7,8 @@ import androidx.room.PrimaryKey
 
 enum class RoomStatus { OCCUPIED, EMPTY, MAINTENANCE }
 enum class PaymentStatus { PAID, UNPAID }
+/** Status bukti transfer pada tagihan yang belum lunas. */
+enum class TransferStatus { NONE, PENDING, REJECTED }
 enum class ReportStatus { SENT, IN_PROGRESS, DONE }
 enum class AnnouncementTarget { ALL, FLOOR_1, FLOOR_2 }
 
@@ -80,8 +82,20 @@ data class PaymentEntity(
     val receiptNo: String? = null,
     val receivedBy: String? = null,
     val dueDate: Long,
-    val reminderSentAt: Long? = null
-)
+    val reminderSentAt: Long? = null,
+    // ---- Pembayaran transfer ----
+    val transferStatus: TransferStatus = TransferStatus.NONE,
+    val transferNote: String? = null,
+    val transferSubmittedAt: Long? = null,
+    val rejectReason: String? = null,
+    /** true jika ada foto bukti transfer di server (dibuka lewat GET /payments/{id}/proof). */
+    val hasProof: Boolean = false
+) {
+    val isPaid: Boolean get() = status == PaymentStatus.PAID
+    /** Bukti transfer sudah dikirim penghuni dan menunggu verifikasi admin. */
+    val isAwaitingVerification: Boolean get() = !isPaid && transferStatus == TransferStatus.PENDING
+    val isTransferRejected: Boolean get() = !isPaid && transferStatus == TransferStatus.REJECTED
+}
 
 @Entity(tableName = "announcements")
 data class AnnouncementEntity(

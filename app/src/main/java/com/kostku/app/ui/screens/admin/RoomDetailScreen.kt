@@ -63,6 +63,7 @@ import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.kostku.app.data.local.PaymentStatus
 import com.kostku.app.data.local.RoomStatus
+import com.kostku.app.data.repository.KostRepository
 import com.kostku.app.data.repository.RoomCardData
 import com.kostku.app.ui.components.AppCard
 import com.kostku.app.ui.components.EmptyChip
@@ -71,7 +72,12 @@ import com.kostku.app.ui.components.KostKuTextField
 import com.kostku.app.ui.components.LocalNotifier
 import com.kostku.app.ui.components.MaintenanceChip
 import com.kostku.app.ui.components.PaymentStatusChip
+import com.kostku.app.ui.components.FloorTabs
+import com.kostku.app.ui.components.NoticeBox
+import com.kostku.app.ui.components.NoticeTone
+import com.kostku.app.ui.components.PaymentStateChip
 import com.kostku.app.ui.components.PrimaryButton
+import com.kostku.app.ui.components.ProofPicker
 import com.kostku.app.ui.components.RoomPhotoPager
 import com.kostku.app.ui.components.SecondaryButton
 import com.kostku.app.ui.components.SectionLabel
@@ -232,14 +238,25 @@ fun RoomDetailScreen(roomId: Long, vm: AdminViewModel, nav: NavHostController) {
                             color = Ink900,
                             modifier = Modifier.weight(1f)
                         )
-                        PaymentStatusChip(paid)
+                        PaymentStateChip(payment, short = true)
                     }
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        if (paid) "Lunas pada ${payment.paidAt?.let { Fmt.date(it) } ?: "-"}"
+                        if (paid) "Lunas pada ${payment.paidAt?.let { Fmt.date(it) } ?: "-"} • ${payment.method ?: "Tunai"}"
                         else "Jatuh tempo ${Fmt.date(payment.dueDate)}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Ink600
+                    )
+                }
+                if (payment.isAwaitingVerification) {
+                    Spacer(Modifier.height(10.dp))
+                    PendingTransferBanner(payment) { nav.navigate(AdminRoutes.transfer(payment.id)) }
+                } else if (payment.isTransferRejected) {
+                    Spacer(Modifier.height(10.dp))
+                    NoticeBox(
+                        "Bukti transfer ditolak",
+                        "Alasan: ${payment.rejectReason ?: "-"}. Menunggu penghuni mengirim ulang bukti.",
+                        NoticeTone.DANGER
                     )
                 }
             }
@@ -253,8 +270,12 @@ fun RoomDetailScreen(roomId: Long, vm: AdminViewModel, nav: NavHostController) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp)) {
                 when (room.status) {
                     RoomStatus.OCCUPIED -> {
-                        if (payment != null && !paid) {
-                            PrimaryButton("CATAT PEMBAYARAN TUNAI (${Fmt.rupiah(payment.amount)})", { showConfirm = true })
+                        if (payment != null && payment.isAwaitingVerification) {
+                            PrimaryButton("PERIKSA BUKTI TRANSFER", { nav.navigate(AdminRoutes.transfer(payment.id)) })
+                            Spacer(Modifier.height(8.dp))
+                            SecondaryButton("Catat Pembayaran Lain", { showConfirm = true })
+                        } else if (payment != null && !paid) {
+                            PrimaryButton("CATAT PEMBAYARAN (${Fmt.rupiah(payment.amount)})", { showConfirm = true })
                         } else if (payment != null) {
                             SecondaryButton("Lihat Nota Pembayaran", { nav.navigate(AdminRoutes.receipt(payment.id)) })
                         }
@@ -294,18 +315,18 @@ fun RoomDetailScreen(roomId: Long, vm: AdminViewModel, nav: NavHostController) {
     }
 
     if (showConfirm && payment != null && tenant != null) {
-        ConfirmCashSheet(
+        ConfirmPaymentSheet(
             card = card,
             periodLabel = Fmt.month(payment.periodYear, payment.periodMonth),
             loading = confirming,
             onDismiss = { if (!confirming) showConfirm = false },
-            onConfirm = {
+            onConfirm = { method, proofPath ->
                 confirming = true
-                vm.confirmPayment(payment.id) { result ->
+                vm.confirmPayment(payment.id, method, proofPath) { result ->
                     confirming = false
                     result.onSuccess {
                         showConfirm = false
-                        notify("Pembayaran Kamar ${room.number} dicatat lunas")
+                        notify("Pembayaran Kamar ${room.number} dicatat lunas ($method)")
                         nav.navigate(AdminRoutes.receipt(it.id))
                     }.onFailure {
                         showConfirm = false
@@ -463,26 +484,29 @@ private fun UploadPhotoDialog(roomNumber: Int, onDismiss: () -> Unit, onSave: (S
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ConfirmCashSheet(
+private fun ConfirmPaymentSheet(
     card: RoomCardData,
     periodLabel: String,
     loading: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: () -> Unit
+    onConfirm: (method: String, proofPath: String?) -> Unit
 ) {
     val amount = card.payment?.amount ?: card.room.monthlyRate
+    var methodIndex by remember { mutableStateOf(0) } // 0 tunai, 1 transfer
+    var proofPath by remember { mutableStateOf<String?>(null) }
+    val isTransfer = methodIndex == 1
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = White,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ) {
-        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
             Box(Modifier.size(44.dp).background(Green50, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
                 Icon(Icons.Outlined.CheckCircle, null, tint = Green700)
             }
             Spacer(Modifier.height(14.dp))
-            Text("Konfirmasi Pembayaran Tunai", style = MaterialTheme.typography.headlineSmall, color = Ink900)
+            Text("Konfirmasi Pembayaran", style = MaterialTheme.typography.headlineSmall, color = Ink900)
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -500,13 +524,37 @@ private fun ConfirmCashSheet(
                 style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.ExtraBold), color = Ink900
             )
             Text("Terbilang: ${Fmt.terbilang(amount)}.", style = MaterialTheme.typography.bodySmall, color = Ink600)
+            Spacer(Modifier.height(16.dp))
+            Text("Metode pembayaran", style = MaterialTheme.typography.titleSmall, color = Ink900)
+            Spacer(Modifier.height(8.dp))
+            FloorTabs(listOf("Tunai", "Transfer"), methodIndex, { methodIndex = it })
             Spacer(Modifier.height(14.dp))
-            Text(
-                "Pastikan uang tunai sudah Anda terima sebelum konfirmasi.",
-                style = MaterialTheme.typography.bodyMedium, color = Ink600
-            )
+            if (isTransfer) {
+                Text("Bukti transfer (opsional)", style = MaterialTheme.typography.titleSmall, color = Ink900)
+                Spacer(Modifier.height(8.dp))
+                ProofPicker(proofPath, { proofPath = it }, enabled = !loading)
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Pastikan dana sudah masuk ke rekening sebelum konfirmasi.",
+                    style = MaterialTheme.typography.bodyMedium, color = Ink600
+                )
+            } else {
+                Text(
+                    "Pastikan uang tunai sudah Anda terima sebelum konfirmasi.",
+                    style = MaterialTheme.typography.bodyMedium, color = Ink600
+                )
+            }
             Spacer(Modifier.height(20.dp))
-            PrimaryButton("YA, SUDAH TERIMA UANG", onConfirm, loading = loading)
+            PrimaryButton(
+                if (isTransfer) "YA, DANA SUDAH MASUK" else "YA, SUDAH TERIMA UANG",
+                {
+                    onConfirm(
+                        if (isTransfer) KostRepository.METHOD_TRANSFER else KostRepository.METHOD_CASH,
+                        if (isTransfer) proofPath else null
+                    )
+                },
+                loading = loading
+            )
             Spacer(Modifier.height(10.dp))
             SecondaryButton("Batal", onDismiss)
         }

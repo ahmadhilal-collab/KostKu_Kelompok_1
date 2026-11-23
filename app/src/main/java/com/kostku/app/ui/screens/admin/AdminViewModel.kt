@@ -12,6 +12,7 @@ import com.kostku.app.data.local.PaymentStatus
 import com.kostku.app.data.local.RepairReportEntity
 import com.kostku.app.data.local.ReportStatus
 import com.kostku.app.data.local.TenantEntity
+import com.kostku.app.data.remote.PaymentSettings
 import com.kostku.app.data.repository.KostRepository
 import com.kostku.app.data.repository.ReceiptData
 import kotlinx.coroutines.CancellationException
@@ -46,6 +47,16 @@ class AdminViewModel(
     val reports = repo.observeReports().state(emptyList())
     val paidReceipts = repo.observePaidInfo().state(emptyList())
     val photosByRoom = repo.observeAllPhotos().map { list -> list.groupBy { it.roomId } }.state(emptyMap())
+
+    // ---- Rekap & verifikasi pembayaran ----
+    val rooms = repo.observeRooms().state(emptyList())
+    val allPayments = repo.observeAllPayments().state(emptyList())
+    /** Termasuk penghuni yang sudah keluar, supaya nama tetap tampil di riwayat. */
+    val allTenants = repo.observeAllTenants().state(emptyList())
+    val pendingTransfers = repo.observeAllPayments()
+        .map { list -> list.filter { it.isAwaitingVerification }.sortedBy { it.transferSubmittedAt ?: 0L } }
+        .state(emptyList())
+    val paymentSettings: StateFlow<PaymentSettings> = repo.paymentSettings
 
     /** Pesan untuk snackbar (berhasil / gagal), ditampilkan oleh AdminShell. */
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
@@ -123,9 +134,34 @@ class AdminViewModel(
         viewModelScope.launch { onResult(repo.endTenancy(tenantId)) }
     }
 
-    fun confirmPayment(paymentId: Long, onResult: (Result<PaymentEntity>) -> Unit) {
-        viewModelScope.launch { onResult(repo.confirmCashPayment(paymentId, adminName).alsoRefresh()) }
+    /** Catat lunas. [method] = "Tunai" / "Transfer"; [proofPath] = foto bukti (opsional untuk transfer). */
+    fun confirmPayment(
+        paymentId: Long, method: String, proofPath: String?, onResult: (Result<PaymentEntity>) -> Unit
+    ) {
+        viewModelScope.launch { onResult(repo.confirmPayment(paymentId, method, proofPath, adminName).alsoRefresh()) }
     }
+
+    fun verifyTransfer(paymentId: Long, onResult: (Result<PaymentEntity>) -> Unit) {
+        viewModelScope.launch { onResult(repo.verifyTransfer(paymentId, adminName).alsoRefresh()) }
+    }
+
+    fun rejectTransfer(paymentId: Long, reason: String, onResult: (Result<Unit>) -> Unit) {
+        viewModelScope.launch { onResult(repo.rejectTransfer(paymentId, reason).alsoRefresh()) }
+    }
+
+    fun savePaymentSettings(settings: PaymentSettings, onResult: (Result<PaymentSettings>) -> Unit) {
+        viewModelScope.launch { onResult(repo.savePaymentSettings(settings)) }
+    }
+
+    fun updateTenant(
+        tenantId: Long, name: String, nik: String, phone: String, entryDate: Long, rate: Long,
+        onResult: (Result<TenantEntity>) -> Unit
+    ) {
+        viewModelScope.launch { onResult(repo.updateTenant(tenantId, name, nik, phone, entryDate, rate).alsoRefresh()) }
+    }
+
+    fun proofUrl(payment: PaymentEntity): String = repo.proofUrl(payment)
+    fun authHeader(): String? = repo.authHeader()
 
     fun markReminderSent(paymentId: Long) = launchOp(successMessage = null) { repo.markReminderSent(paymentId) }
 

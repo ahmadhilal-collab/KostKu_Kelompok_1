@@ -168,6 +168,10 @@ interface PaymentDao {
     @Query("SELECT * FROM payments WHERE tenantId = :tenantId ORDER BY periodYear DESC, periodMonth DESC")
     fun observeByTenant(tenantId: Long): Flow<List<PaymentEntity>>
 
+    /** Semua tagihan (untuk rekap bulanan, rekap per kamar, dan verifikasi transfer). */
+    @Query("SELECT * FROM payments ORDER BY periodYear DESC, periodMonth DESC")
+    fun observeAll(): Flow<List<PaymentEntity>>
+
     // ---- Sinkronisasi dari API ----
     @Upsert
     suspend fun upsertAll(payments: List<PaymentEntity>)

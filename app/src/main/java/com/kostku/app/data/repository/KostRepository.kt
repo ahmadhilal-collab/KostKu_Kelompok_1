@@ -3,7 +3,9 @@ package com.kostku.app.data.repository
 import androidx.room.withTransaction
 import com.kostku.app.data.local.AnnouncementEntity
 import com.kostku.app.data.local.AnnouncementTarget
+import com.kostku.app.BuildConfig
 import com.kostku.app.data.local.AppDatabase
+import com.kostku.app.data.local.SessionStore
 import com.kostku.app.data.local.PaymentEntity
 import com.kostku.app.data.local.PaymentStatus
 import com.kostku.app.data.local.RepairReportEntity
@@ -17,6 +19,11 @@ import com.kostku.app.data.remote.ApiClient
 import com.kostku.app.data.remote.ApiDates
 import com.kostku.app.data.remote.CreateTenantRequest
 import com.kostku.app.data.remote.InboxItem
+import com.kostku.app.data.remote.PaymentSettings
+import com.kostku.app.data.remote.RejectTransferRequest
+import com.kostku.app.data.remote.UpdateMyProfileRequest
+import com.kostku.app.data.remote.UpdateTenantRequest
+import com.kostku.app.data.remote.toModel
 import com.kostku.app.data.remote.PaymentDto
 import com.kostku.app.data.remote.ReportDto
 import com.kostku.app.data.remote.ReportStatusRequest
@@ -32,6 +39,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -69,8 +79,13 @@ data class ReceiptData(
  */
 class KostRepository(
     private val db: AppDatabase,
-    private val client: ApiClient
+    private val client: ApiClient,
+    private val sessionStore: SessionStore
 ) {
+
+    /** Pengaturan metode pembayaran terakhir dari server (rekening transfer, metode aktif). */
+    private val _paymentSettings = MutableStateFlow(PaymentSettings.DEFAULT)
+    val paymentSettings: StateFlow<PaymentSettings> = _paymentSettings.asStateFlow()
 
     private val roomDao = db.roomDao()
     private val tenantDao = db.tenantDao()
@@ -112,6 +127,11 @@ class KostRepository(
 
     fun observePaymentsByTenant(tenantId: Long): Flow<List<PaymentEntity>> = paymentDao.observeByTenant(tenantId)
 
+    fun observeAllPayments(): Flow<List<PaymentEntity>> = paymentDao.observeAll()
+
+    /** Semua penghuni, termasuk yang sudah keluar (untuk nama pada rekap & riwayat kamar). */
+    fun observeAllTenants(): Flow<List<TenantEntity>> = tenantDao.observeAll()
+
     fun observePaidInfo(): Flow<List<PaidInfo>> = combine(
         paymentDao.observePaid(), tenantDao.observeAll(), roomDao.observeAll()
     ) { paid, tenants, rooms ->
@@ -150,12 +170,16 @@ class KostRepository(
         }
         val announcementsReq = async { client.call { this.announcements() } }
         val reportsReq = async { client.call { this.reports() } }
+        // Bukti transfer yang menunggu verifikasi bisa untuk bulan mana pun.
+        val pendingReq = async { runCatching { client.call { this.payments(transfer = "pending") } }.getOrDefault(emptyList()) }
+        val settingsReq = async { runCatching { client.call { this.paymentSettings() } }.getOrNull() }
 
         val rooms = roomsReq.await()
         val tenants = tenantsReq.await()
         val payments = paymentsReq.await()
         val announcements = announcementsReq.await()
         val reports = reportsReq.await()
+        val pending = pendingReq.await()
 
         // Kelompokkan per bulan. Bulan berjalan selalu disimpan, walau belum ada tagihan.
         val byPeriod = payments.groupBy { YearMonth.of(it.periodYear, it.periodMonth) }
@@ -173,12 +197,15 @@ class KostRepository(
 
             // 3. Tagihan per bulan
             byPeriod.forEach { (ym, list) -> savePeriod(ym, list) }
+            rememberTenantNames(pending.map { Triple(it.tenantId, it.tenantName, it.roomId) })
+            paymentDao.upsertAll(pending.map { it.toEntity(receivedBy = paymentDao.getById(it.id)?.receivedBy) })
 
             // 4. Pengumuman & laporan
             announcementDao.deleteAllExcept(announcements.map { it.id })
             announcementDao.upsertAll(announcements.map { it.toEntity() })
             saveReports(reports)
         }
+        settingsReq.await()?.let { _paymentSettings.value = it.toModel() }
 
         // 5. Foto. Backend baru mengirim semua foto di daftar kamar; backend lama hanya jumlahnya,
         //    sehingga kamar yang jumlah fotonya berubah diambil ulang satu per satu.
@@ -218,11 +245,13 @@ class KostRepository(
         val paymentsReq = async { client.call { this.payments() } }
         val announcementsReq = async { client.call { this.announcements() } }
         val reportsReq = async { client.call { this.reports() } }
+        val settingsReq = async { runCatching { client.call { this.paymentSettings() } }.getOrNull() }
 
         val room = roomReq.await()
         val payments = paymentsReq.await()
         val announcements = announcementsReq.await()
         val reports = reportsReq.await()
+        settingsReq.await()?.let { _paymentSettings.value = it.toModel() }
 
         db.withTransaction {
             saveRoomDetail(room)
@@ -332,12 +361,96 @@ class KostRepository(
         }
     }
 
-    suspend fun confirmCashPayment(paymentId: Long, receivedBy: String): Result<PaymentEntity> = runCatching {
-        val dto = client.call { this.confirmCash(paymentId) }
+    /**
+     * Admin mencatat tagihan lunas.
+     * @param method "Tunai" atau "Transfer"
+     * @param proofPath foto bukti transfer di HP (opsional, hanya untuk Transfer)
+     */
+    suspend fun confirmPayment(
+        paymentId: Long, method: String, proofPath: String?, receivedBy: String
+    ): Result<PaymentEntity> = runCatching {
+        val file = proofPath?.let { File(it) }?.takeIf { method == METHOD_TRANSFER && it.exists() }
+        val part = file?.let { MultipartBody.Part.createFormData("proof", it.name, it.asRequestBody(JPEG)) }
+        val dto = client.call { this.confirmPayment(paymentId, method.toRequestBody(TEXT), part) }
+        file?.delete()
         val entity = dto.toEntity(receivedBy = receivedBy)
         paymentDao.upsert(entity)
         entity
     }
+
+    /** Admin menyetujui bukti transfer → lunas + nota. */
+    suspend fun verifyTransfer(paymentId: Long, receivedBy: String): Result<PaymentEntity> = runCatching {
+        val entity = client.call { this.verifyTransfer(paymentId) }.toEntity(receivedBy = receivedBy)
+        paymentDao.upsert(entity)
+        entity
+    }
+
+    /** Admin menolak bukti transfer dengan alasan; penghuni bisa mengirim ulang. */
+    suspend fun rejectTransfer(paymentId: Long, reason: String): Result<Unit> = runCatching {
+        val dto = client.call { this.rejectTransfer(paymentId, RejectTransferRequest(reason.trim())) }
+        paymentDao.upsert(dto.toEntity())
+    }
+
+    /** Penghuni mengirim foto bukti transfer. */
+    suspend fun submitTransfer(paymentId: Long, proofPath: String, note: String): Result<PaymentEntity> = runCatching {
+        val file = File(proofPath)
+        val part = MultipartBody.Part.createFormData("proof", file.name, file.asRequestBody(JPEG))
+        val entity = client.call { this.submitTransfer(paymentId, part, note.trim().toRequestBody(TEXT)) }.toEntity()
+        file.delete()
+        paymentDao.upsert(entity)
+        entity
+    }
+
+    /** Admin menyimpan rekening tujuan dan metode yang aktif. */
+    suspend fun savePaymentSettings(settings: PaymentSettings): Result<PaymentSettings> = runCatching {
+        val saved = client.call { this.updatePaymentSettings(settings.toDto()) }.toModel()
+        _paymentSettings.value = saved
+        saved
+    }
+
+    /** Alamat foto bukti transfer. [version] mencegah Coil memakai foto lama dari cache setelah diganti. */
+    fun proofUrl(payment: PaymentEntity): String =
+        BuildConfig.API_BASE_URL + "payments/${payment.id}/proof?v=${payment.transferSubmittedAt ?: payment.paidAt ?: 0L}"
+
+    /** Header login untuk memuat foto bukti (bukti transfer tidak bisa dibuka tanpa login). */
+    fun authHeader(): String? = sessionStore.token()?.let { "Bearer $it" }
+
+    // ---- Data penghuni ----
+
+    /** Admin mengubah data penghuni. */
+    suspend fun updateTenant(
+        tenantId: Long, name: String, nik: String, phone: String, entryDate: Long, rate: Long
+    ): Result<TenantEntity> = runCatching {
+        val dto = client.call {
+            this.updateTenant(
+                tenantId,
+                UpdateTenantRequest(name.trim(), nik, PhoneUtils.normalize(phone), ApiDates.millisToDate(entryDate), rate)
+            )
+        }
+        val entity = dto.toEntity()
+        tenantDao.upsert(entity)
+        roomDao.getById(entity.roomId)?.let { roomDao.upsert(it.copy(monthlyRate = rate)) }
+        entity
+    }
+
+    /** Penghuni: data diri lengkap dari server. */
+    suspend fun fetchMyProfile(): Result<TenantEntity> = runCatching {
+        val entity = client.call { this.myProfile() }.toEntity()
+        tenantDao.upsert(entity)
+        entity
+    }
+
+    /** Penghuni mengubah nama & nomor HP. Nama di sesi ikut diperbarui. */
+    suspend fun updateMyProfile(name: String, phone: String): Result<TenantEntity> = runCatching {
+        val entity = client.call { this.updateMyProfile(UpdateMyProfileRequest(name.trim(), PhoneUtils.normalize(phone))) }.toEntity()
+        tenantDao.upsert(entity)
+        sessionStore.updateName(entity.name)
+        entity
+    }
+
+    /** Nama & nomor pengelola (untuk layar bayar tunai). */
+    suspend fun fetchContact(): com.kostku.app.data.remote.ContactDto? =
+        runCatching { client.call { this.contact() } }.getOrNull()
 
     /** Mencatat pengingat di server (server juga mengirim notifikasi ke penghuni). */
     suspend fun markReminderSent(paymentId: Long) {
@@ -430,7 +543,10 @@ class KostRepository(
         client.callUnit { this.readAllNotifications() }
     }
 
-    private companion object {
-        val TEXT = "text/plain".toMediaType()
+    companion object {
+        const val METHOD_CASH = "Tunai"
+        const val METHOD_TRANSFER = "Transfer"
+        private val TEXT = "text/plain".toMediaType()
+        private val JPEG = "image/jpeg".toMediaType()
     }
 }

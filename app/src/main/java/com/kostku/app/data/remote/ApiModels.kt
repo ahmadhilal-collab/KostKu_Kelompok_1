@@ -159,7 +159,13 @@ data class PaymentDto(
     @SerializedName("due_date") val dueDate: String,
     /** ISO-8601, mis. 2026-11-17T08:24:00+08:00 */
     @SerializedName("paid_at") val paidAt: String?,
-    @SerializedName("reminder_sent_at") val reminderSentAt: String?
+    @SerializedName("reminder_sent_at") val reminderSentAt: String?,
+    /** none | pending | rejected (null pada backend lama) */
+    @SerializedName("transfer_status") val transferStatus: String? = null,
+    @SerializedName("transfer_note") val transferNote: String? = null,
+    @SerializedName("transfer_submitted_at") val transferSubmittedAt: String? = null,
+    @SerializedName("reject_reason") val rejectReason: String? = null,
+    @SerializedName("has_proof") val hasProof: Boolean? = null
 )
 
 data class ReceiptDto(
@@ -217,6 +223,37 @@ data class ReportDto(
 
 data class ReportStatusRequest(
     @SerializedName("status") val status: String
+)
+
+// ───────────────────────── Metode pembayaran ─────────────────────────
+
+/** GET/PUT /payment-settings */
+data class PaymentSettingsDto(
+    @SerializedName("transfer_enabled") val transferEnabled: Boolean,
+    @SerializedName("cash_enabled") val cashEnabled: Boolean,
+    @SerializedName("bank_name") val bankName: String?,
+    @SerializedName("account_number") val accountNumber: String?,
+    @SerializedName("account_holder") val accountHolder: String?,
+    @SerializedName("transfer_note") val transferNote: String?
+)
+
+data class RejectTransferRequest(
+    @SerializedName("reason") val reason: String
+)
+
+/** PUT /my/profile (penghuni) */
+data class UpdateMyProfileRequest(
+    @SerializedName("name") val name: String,
+    @SerializedName("phone") val phone: String
+)
+
+/** PUT /tenants/{id} (admin) */
+data class UpdateTenantRequest(
+    @SerializedName("name") val name: String,
+    @SerializedName("nik") val nik: String,
+    @SerializedName("phone") val phone: String,
+    @SerializedName("entry_date") val entryDate: String,
+    @SerializedName("monthly_rate") val monthlyRate: Long
 )
 
 // ───────────────────────── Notifikasi (Tahap H) ─────────────────────────

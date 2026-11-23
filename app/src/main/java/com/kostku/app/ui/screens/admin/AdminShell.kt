@@ -61,11 +61,20 @@ object AdminRoutes {
     const val CATALOG = "a_catalog"
     const val RECEIPTS = "a_receipts"
     const val RECEIPT = "a_receipt/{id}"
+    const val RECAP_MONTH = "a_recap_month"
+    const val RECAP_ROOM = "a_recap_room"
+    const val ROOM_HISTORY = "a_room_history/{id}"
+    const val TRANSFER = "a_transfer/{id}"
+    const val PAYMENT_SETTINGS = "a_payment_settings"
+    const val TENANT_EDIT = "a_tenant_edit/{id}"
 
     fun room(id: Long) = "a_room/$id"
     fun tenant(id: Long) = "a_tenant/$id"
     fun tenantAdd(roomId: Long = -1L) = "a_tenant_add?roomId=$roomId"
     fun receipt(id: Long) = "a_receipt/$id"
+    fun roomHistory(id: Long) = "a_room_history/$id"
+    fun transfer(id: Long) = "a_transfer/$id"
+    fun tenantEdit(id: Long) = "a_tenant_edit/$id"
 }
 
 private val adminTabs = listOf(
@@ -156,7 +165,22 @@ fun AdminShell(session: Session, onLogout: () -> Unit) {
                 composable(AdminRoutes.ANNOUNCE) { AnnouncementListScreen(vm, nav) }
                 composable(AdminRoutes.ANNOUNCE_NEW) { AnnouncementCreateScreen(vm, nav) }
                 composable(AdminRoutes.CATALOG) { CatalogScreen(vm, nav) }
-                composable(AdminRoutes.RECEIPTS) { ReceiptListScreen(vm, nav) }
+                composable(AdminRoutes.RECEIPTS) { PaymentHubScreen(vm, nav) }
+                composable(AdminRoutes.RECAP_MONTH) { MonthlyRecapScreen(vm, nav) }
+                composable(AdminRoutes.RECAP_ROOM) { RoomRecapScreen(vm, nav) }
+                composable(
+                    AdminRoutes.ROOM_HISTORY,
+                    arguments = listOf(navArgument("id") { type = NavType.LongType })
+                ) { RoomPaymentHistoryScreen(it.arguments?.getLong("id") ?: -1L, vm, nav) }
+                composable(
+                    AdminRoutes.TRANSFER,
+                    arguments = listOf(navArgument("id") { type = NavType.LongType })
+                ) { TransferVerifyScreen(it.arguments?.getLong("id") ?: -1L, vm, nav) }
+                composable(AdminRoutes.PAYMENT_SETTINGS) { PaymentSettingsScreen(vm, nav) }
+                composable(
+                    AdminRoutes.TENANT_EDIT,
+                    arguments = listOf(navArgument("id") { type = NavType.LongType })
+                ) { TenantEditScreen(it.arguments?.getLong("id") ?: -1L, vm, nav) }
                 composable(
                     AdminRoutes.RECEIPT,
                     arguments = listOf(navArgument("id") { type = NavType.LongType })

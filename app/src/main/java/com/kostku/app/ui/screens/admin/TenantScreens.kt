@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -63,6 +64,7 @@ import com.kostku.app.ui.components.ErrorBanner
 import com.kostku.app.ui.components.InfoNote
 import com.kostku.app.ui.components.InitialsAvatar
 import com.kostku.app.ui.components.KostKuTextField
+import com.kostku.app.ui.components.PaymentStateChip
 import com.kostku.app.ui.components.LocalNotifier
 import com.kostku.app.ui.components.PageHeader
 import com.kostku.app.ui.components.PaymentStatusChip
@@ -80,6 +82,9 @@ import com.kostku.app.ui.theme.White
 import com.kostku.app.util.Fmt
 import com.kostku.app.util.Intents
 import com.kostku.app.util.Validators
+import com.kostku.app.util.PhoneUtils
+import com.kostku.app.data.local.TenantEntity
+import androidx.compose.material.icons.outlined.Edit
 import java.time.LocalDate
 
 private fun maskPhone(phone: String) = phone.take(2) + "•• •••• ••••"
@@ -312,6 +317,14 @@ fun TenantDetailScreen(tenantId: Long, vm: AdminViewModel, nav: NavHostControlle
                 InfoRow("NIK", t.nik)
                 InfoRow("Masuk sejak", Fmt.date(t.entryDate))
                 InfoRow("Tarif / bulan", Fmt.rupiah(t.monthlyRate))
+                if (t.active) {
+                    Spacer(Modifier.height(6.dp))
+                    TextButton(onClick = { nav.navigate(AdminRoutes.tenantEdit(t.id)) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Outlined.Edit, null, tint = Green700, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Ubah data penghuni", color = Green700)
+                    }
+                }
             }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -340,18 +353,26 @@ fun TenantDetailScreen(tenantId: Long, vm: AdminViewModel, nav: NavHostControlle
                 val paid = p.status == PaymentStatus.PAID
                 AppCard(
                     Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                    onClick = if (paid) ({ nav.navigate(AdminRoutes.receipt(p.id)) }) else null
+                    onClick = when {
+                        paid -> ({ nav.navigate(AdminRoutes.receipt(p.id)) })
+                        p.isAwaitingVerification -> ({ nav.navigate(AdminRoutes.transfer(p.id)) })
+                        else -> null
+                    }
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(Fmt.month(p.periodYear, p.periodMonth), style = MaterialTheme.typography.titleSmall, color = Ink900)
                             Text(
-                                if (paid) "Tunai • ${Fmt.date(p.paidAt ?: p.dueDate)}" else "Jatuh tempo ${Fmt.date(p.dueDate)}",
+                                when {
+                                    paid -> "${p.method ?: "Tunai"} • ${Fmt.date(p.paidAt ?: p.dueDate)}"
+                                    p.isAwaitingVerification -> "Bukti transfer menunggu verifikasi"
+                                    else -> "Jatuh tempo ${Fmt.date(p.dueDate)}"
+                                },
                                 style = MaterialTheme.typography.bodySmall, color = Ink600
                             )
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            PaymentStatusChip(paid)
+                            PaymentStateChip(p, short = true)
                             Spacer(Modifier.height(4.dp))
                             Text(Fmt.rupiah(p.amount), style = MaterialTheme.typography.labelMedium, color = Ink900)
                         }
@@ -391,6 +412,97 @@ fun TenantDetailScreen(tenantId: Long, vm: AdminViewModel, nav: NavHostControlle
             },
             dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Batal", color = Ink600) } }
         )
+    }
+}
+
+/** Admin mengubah data penghuni: nama, NIK, nomor HP, tanggal masuk, dan tarif. */
+@Composable
+fun TenantEditScreen(tenantId: Long, vm: AdminViewModel, nav: NavHostController) {
+    val tenant by remember(tenantId) { vm.observeTenant(tenantId) }.collectAsStateWithLifecycle(initialValue = null)
+    val t = tenant
+    Column(Modifier.fillMaxSize()) {
+        TopBarWithBack("Ubah Data Penghuni", { nav.popBackStack() })
+        if (t == null) {
+            EmptyState(Icons.Outlined.Groups, "Memuat data…", "Mohon tunggu sebentar.")
+            return@Column
+        }
+        TenantEditForm(t, vm, nav)
+    }
+}
+
+@Composable
+private fun ColumnScope.TenantEditForm(t: TenantEntity, vm: AdminViewModel, nav: NavHostController) {
+    val notify = LocalNotifier.current
+    var name by rememberSaveable { mutableStateOf(t.name) }
+    var nik by rememberSaveable { mutableStateOf(t.nik) }
+    var phone by rememberSaveable { mutableStateOf(t.phone) }
+    var rate by rememberSaveable { mutableStateOf(t.monthlyRate.toString()) }
+    var entry by remember { mutableStateOf(Fmt.localDate(t.entryDate)) }
+    var errors by remember { mutableStateOf(emptyMap<String, String>()) }
+    var saving by remember { mutableStateOf(false) }
+    var failure by remember { mutableStateOf<String?>(null) }
+    val loginChanged = name.trim() != t.name || nik != t.nik || PhoneUtils.normalize(phone) != PhoneUtils.normalize(t.phone)
+
+    fun submit() {
+        val e = buildMap {
+            if (name.trim().length < 3) put("name", "Nama lengkap minimal 3 huruf")
+            if (!Validators.isValidNik(nik)) put("nik", "NIK harus 16 digit angka")
+            if (!Validators.isValidPhone(phone)) put("phone", "Nomor HP tidak valid (contoh: 0812xxxxxxxx)")
+            if ((rate.toLongOrNull() ?: 0L) < 100_000L) put("rate", "Tarif minimal Rp100.000")
+        }
+        errors = e
+        if (e.isNotEmpty()) return
+        saving = true
+        failure = null
+        vm.updateTenant(t.id, name, nik, phone, Fmt.startOfDayMillis(entry), rate.toLong()) { r ->
+            saving = false
+            r.onSuccess { notify("Data ${it.name} diperbarui"); nav.popBackStack() }
+                .onFailure { e2 ->
+                    failure = e2.message
+                    (e2 as? com.kostku.app.data.remote.ApiException)?.fieldErrors?.let { fe ->
+                        errors = fe.mapKeys { (k, _) -> if (k == "monthly_rate") "rate" else k }
+                    }
+                }
+        }
+    }
+
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+        PageHeader("Data penghuni", "Perubahan langsung berlaku di aplikasi penghuni.")
+        Spacer(Modifier.height(20.dp))
+        KostKuTextField("Nama lengkap", name, { name = it; errors = errors - "name" }, "Masukkan nama lengkap", error = errors["name"], enabled = !saving)
+        Spacer(Modifier.height(16.dp))
+        KostKuTextField(
+            "NIK", nik, { nik = it.filter(Char::isDigit).take(16); errors = errors - "nik" },
+            "16 digit NIK", keyboardType = KeyboardType.Number, error = errors["nik"], enabled = !saving
+        )
+        Spacer(Modifier.height(16.dp))
+        KostKuTextField(
+            "Nomor HP", phone, { phone = it.filter { c -> c.isDigit() || c == '+' }.take(15); errors = errors - "phone" },
+            "08xx xxxx xxxx", keyboardType = KeyboardType.Phone, error = errors["phone"], enabled = !saving
+        )
+        Spacer(Modifier.height(16.dp))
+        DateField("Tanggal masuk", entry, { entry = it })
+        Spacer(Modifier.height(16.dp))
+        KostKuTextField(
+            "Tarif per bulan (All-In)", rate, { rate = it.filter(Char::isDigit).take(9); errors = errors - "rate" },
+            "800000", keyboardType = KeyboardType.Number, imeAction = ImeAction.Done, error = errors["rate"], enabled = !saving
+        )
+        Text(
+            "${Fmt.rupiah(rate.toLongOrNull() ?: 0L)} • berlaku untuk tagihan bulan berikutnya.",
+            style = MaterialTheme.typography.bodySmall, color = Ink600, modifier = Modifier.padding(top = 6.dp, start = 4.dp)
+        )
+        Spacer(Modifier.height(16.dp))
+        if (loginChanged) {
+            InfoNote("Nama, NIK, atau nomor HP berubah. Penghuni harus memakai data baru ini saat login berikutnya; mereka akan menerima notifikasi.")
+            Spacer(Modifier.height(12.dp))
+        }
+        ErrorBanner(failure)
+        Spacer(Modifier.height(16.dp))
+    }
+    Surface(color = White, shadowElevation = 10.dp) {
+        Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp)) {
+            PrimaryButton("Simpan Perubahan", { submit() }, loading = saving)
+        }
     }
 }
 

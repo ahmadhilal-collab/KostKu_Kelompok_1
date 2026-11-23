@@ -56,6 +56,10 @@ import com.kostku.app.ui.components.EmptyState
 import com.kostku.app.ui.components.FloorTabs
 import com.kostku.app.ui.components.PageHeader
 import com.kostku.app.ui.components.PaymentStatusChip
+import com.kostku.app.ui.components.PaymentStateChip
+import com.kostku.app.ui.components.NoticeBox
+import com.kostku.app.ui.components.NoticeTone
+import com.kostku.app.ui.components.PrimaryButton
 import com.kostku.app.ui.components.SectionLabel
 import com.kostku.app.ui.components.TopBarWithBack
 import com.kostku.app.ui.components.entrance
@@ -239,6 +243,8 @@ fun PaymentsScreen(vm: TenantViewModel, session: Session, nav: NavHostController
     var year by rememberSaveable { mutableIntStateOf(vm.period.year) }
     var menuOpen by remember { mutableStateOf(false) }
     val history = payments.filter { it.status == PaymentStatus.PAID && it.periodYear == year }
+    // Tunggakan bulan sebelumnya yang belum lunas (tetap bisa dibayar dari sini)
+    val arrears = payments.filter { !it.isPaid && it.id != current?.id }.sortedBy { it.periodYear * 100 + it.periodMonth }
 
     Column(Modifier.fillMaxSize()) {
         TopBarWithBack("Pembayaran", { nav.popBackStack() })
@@ -261,7 +267,7 @@ fun PaymentsScreen(vm: TenantViewModel, session: Session, nav: NavHostController
                             Fmt.month(vm.period.year, vm.period.monthValue),
                             style = MaterialTheme.typography.titleSmall, color = Ink900, modifier = Modifier.weight(1f)
                         )
-                        if (current != null) PaymentStatusChip(paidNow)
+                        if (current != null) PaymentStateChip(current)
                     }
                     Spacer(Modifier.height(10.dp))
                     Text("Total Tagihan All-In", style = MaterialTheme.typography.bodySmall, color = Ink600)
@@ -284,13 +290,52 @@ fun PaymentsScreen(vm: TenantViewModel, session: Session, nav: NavHostController
                                 Text("Lihat nota", color = Green700)
                             }
                         } else {
-                            Text(
-                                "Nota ${Fmt.month(current.periodYear, current.periodMonth).substringBefore(' ')} tersedia setelah pembayaran dikonfirmasi lunas oleh pengelola.",
-                                style = MaterialTheme.typography.bodySmall, color = Ink600
+                            when {
+                                current.isAwaitingVerification -> NoticeBox(
+                                    "Bukti transfer sedang diverifikasi",
+                                    "Nota tersedia setelah pengelola memastikan dana masuk.",
+                                    NoticeTone.INFO
+                                )
+                                current.isTransferRejected -> NoticeBox(
+                                    "Bukti transfer ditolak",
+                                    "Alasan: ${current.rejectReason ?: "-"}",
+                                    NoticeTone.DANGER
+                                )
+                                else -> Text(
+                                    "Nota ${Fmt.month(current.periodYear, current.periodMonth).substringBefore(' ')} tersedia setelah pembayaran dikonfirmasi lunas oleh pengelola.",
+                                    style = MaterialTheme.typography.bodySmall, color = Ink600
+                                )
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            PrimaryButton(
+                                when {
+                                    current.isAwaitingVerification -> "Lihat Status Bukti"
+                                    current.isTransferRejected -> "Kirim Ulang Bukti"
+                                    else -> "Bayar Sekarang"
+                                },
+                                { nav.navigate(TenantRoutes.pay(current.id)) }
                             )
                         }
                     } else {
                         Text("Belum ada tagihan bulan ini.", style = MaterialTheme.typography.bodyMedium, color = Ink600)
+                    }
+                }
+            }
+            if (arrears.isNotEmpty()) {
+                item { SectionLabel("Tagihan belum lunas", Modifier.padding(top = 6.dp)) }
+                items(arrears, key = { "a" + it.id }) { p ->
+                    AppCard(Modifier.fillMaxWidth(), onClick = { nav.navigate(TenantRoutes.pay(p.id)) }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(Fmt.month(p.periodYear, p.periodMonth), style = MaterialTheme.typography.titleSmall, color = Ink900)
+                                Text(
+                                    "${Fmt.rupiah(p.amount)} • jatuh tempo ${Fmt.date(p.dueDate)}",
+                                    style = MaterialTheme.typography.bodySmall, color = Ink600
+                                )
+                            }
+                            PaymentStateChip(p, short = true)
+                            Icon(Icons.Outlined.ChevronRight, null, tint = Ink600, modifier = Modifier.size(18.dp))
+                        }
                     }
                 }
             }
@@ -318,13 +363,13 @@ fun PaymentsScreen(vm: TenantViewModel, session: Session, nav: NavHostController
                             Fmt.month(p.periodYear, p.periodMonth),
                             style = MaterialTheme.typography.titleSmall, color = Ink900, modifier = Modifier.weight(1f)
                         )
-                        PaymentStatusChip(paid = true)
+                        PaymentStateChip(p, short = true)
                     }
                     Spacer(Modifier.height(4.dp))
                     Text(Fmt.rupiah(p.amount), style = MaterialTheme.typography.titleSmall, color = Ink900)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "Tunai • ${Fmt.date(p.paidAt ?: p.dueDate)}",
+                            "${p.method ?: "Tunai"} • ${Fmt.date(p.paidAt ?: p.dueDate)}",
                             style = MaterialTheme.typography.bodySmall, color = Ink600, modifier = Modifier.weight(1f)
                         )
                         TextButton(onClick = { nav.navigate(TenantRoutes.receipt(p.id)) }) {

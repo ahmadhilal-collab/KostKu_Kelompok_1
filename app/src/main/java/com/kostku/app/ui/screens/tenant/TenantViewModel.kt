@@ -7,7 +7,11 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.kostku.app.KostKuApp
 import com.kostku.app.data.local.AnnouncementTarget
+import com.kostku.app.data.local.PaymentEntity
 import com.kostku.app.data.local.RoomEntity
+import com.kostku.app.data.local.TenantEntity
+import com.kostku.app.data.remote.ContactDto
+import com.kostku.app.data.remote.PaymentSettings
 import com.kostku.app.data.remote.InboxItem
 import com.kostku.app.data.repository.KostRepository
 import com.kostku.app.data.repository.PushRepository
@@ -47,6 +51,16 @@ class TenantViewModel(
         .state(null)
 
     val payments = repo.observePaymentsByTenant(tenantId).state(emptyList())
+
+    /** Rekening tujuan dan metode pembayaran yang diaktifkan pengelola. */
+    val paymentSettings: StateFlow<PaymentSettings> = repo.paymentSettings
+
+    /** Data diri penghuni (nama, NIK, HP, dll.). */
+    val profile: StateFlow<TenantEntity?> = repo.observeTenant(tenantId).state(null)
+
+    /** Nama & nomor pengelola (untuk pembayaran tunai). */
+    private val _contact = MutableStateFlow<ContactDto?>(null)
+    val contact: StateFlow<ContactDto?> = _contact.asStateFlow()
 
     /** Pengumuman yang sudah terbit dan ditujukan untuk lantai penghuni ini. */
     val announcements = combine(repo.observeAnnouncements(), room) { list, r ->
@@ -123,6 +137,31 @@ class TenantViewModel(
     }
 
     suspend fun loadReceipt(paymentId: Long): ReceiptData? = repo.buildReceipt(paymentId)
+
+    // ---- Pembayaran ----
+
+    fun submitTransfer(paymentId: Long, proofPath: String, note: String, onResult: (Result<PaymentEntity>) -> Unit) {
+        viewModelScope.launch { onResult(repo.submitTransfer(paymentId, proofPath, note).onSuccess { refresh() }) }
+    }
+
+    fun loadContact() {
+        if (_contact.value != null) return
+        viewModelScope.launch { _contact.value = repo.fetchContact() }
+    }
+
+    fun proofUrl(payment: PaymentEntity): String = repo.proofUrl(payment)
+    fun authHeader(): String? = repo.authHeader()
+
+    // ---- Data diri ----
+
+    /** Ambil data diri lengkap (termasuk NIK) dari server. */
+    fun loadProfile() {
+        viewModelScope.launch { repo.fetchMyProfile() }
+    }
+
+    fun updateProfile(name: String, phone: String, onResult: (Result<TenantEntity>) -> Unit) {
+        viewModelScope.launch { onResult(repo.updateMyProfile(name, phone)) }
+    }
 
     /** Dipanggil saat meninggalkan layar Pengumuman & Notifikasi. */
     fun markNotificationsRead() {

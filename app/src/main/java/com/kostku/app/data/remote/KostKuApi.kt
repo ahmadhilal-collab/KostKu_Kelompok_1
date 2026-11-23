@@ -67,6 +67,12 @@ interface KostKuApi {
     @GET("my/room")
     suspend fun myRoom(): Response<ApiEnvelope<RoomDetailDto>>
 
+    @GET("my/profile")
+    suspend fun myProfile(): Response<ApiEnvelope<TenantDto>>
+
+    @PUT("my/profile")
+    suspend fun updateMyProfile(@Body body: UpdateMyProfileRequest): Response<ApiEnvelope<TenantDto>>
+
     // ---------- Penghuni ----------
     @GET("tenants")
     suspend fun tenants(): Response<ApiEnvelope<List<TenantDto>>>
@@ -76,6 +82,9 @@ interface KostKuApi {
 
     @POST("tenants")
     suspend fun createTenant(@Body body: CreateTenantRequest): Response<ApiEnvelope<TenantDto>>
+
+    @PUT("tenants/{id}")
+    suspend fun updateTenant(@Path("id") id: Long, @Body body: UpdateTenantRequest): Response<ApiEnvelope<TenantDto>>
 
     /** Mengakhiri sewa (penghuni dinonaktifkan, kamar kembali kosong). */
     @DELETE("tenants/{id}")
@@ -91,7 +100,9 @@ interface KostKuApi {
         @Query("year") year: Int? = null,
         @Query("month") month: Int? = null,
         @Query("status") status: String? = null,
-        @Query("period") period: String? = null
+        @Query("period") period: String? = null,
+        /** "pending" = admin: semua bukti transfer yang menunggu verifikasi (semua periode) */
+        @Query("transfer") transfer: String? = null
     ): Response<ApiEnvelope<List<PaymentDto>>>
 
     @GET("payments/{id}/receipt")
@@ -102,6 +113,37 @@ interface KostKuApi {
 
     @POST("payments/{id}/remind")
     suspend fun remind(@Path("id") id: Long): Response<ApiEnvelope<ReminderDto>>
+
+    /** Admin mencatat lunas: method = "Tunai" | "Transfer"; proof = foto bukti (opsional, transfer). */
+    @Multipart
+    @POST("payments/{id}/confirm")
+    suspend fun confirmPayment(
+        @Path("id") id: Long,
+        @Part("method") method: RequestBody,
+        @Part proof: MultipartBody.Part?
+    ): Response<ApiEnvelope<PaymentDto>>
+
+    /** Penghuni mengirim bukti transfer. */
+    @Multipart
+    @POST("payments/{id}/transfer")
+    suspend fun submitTransfer(
+        @Path("id") id: Long,
+        @Part proof: MultipartBody.Part,
+        @Part("note") note: RequestBody
+    ): Response<ApiEnvelope<PaymentDto>>
+
+    @POST("payments/{id}/verify-transfer")
+    suspend fun verifyTransfer(@Path("id") id: Long): Response<ApiEnvelope<PaymentDto>>
+
+    @POST("payments/{id}/reject-transfer")
+    suspend fun rejectTransfer(@Path("id") id: Long, @Body body: RejectTransferRequest): Response<ApiEnvelope<PaymentDto>>
+
+    // ---------- Pengaturan metode pembayaran ----------
+    @GET("payment-settings")
+    suspend fun paymentSettings(): Response<ApiEnvelope<PaymentSettingsDto>>
+
+    @PUT("payment-settings")
+    suspend fun updatePaymentSettings(@Body body: PaymentSettingsDto): Response<ApiEnvelope<PaymentSettingsDto>>
 
     // ---------- Pengumuman ----------
     @GET("announcements")

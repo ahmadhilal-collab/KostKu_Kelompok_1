@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -50,7 +51,9 @@ fun ProfileInfoScreen(
     roleLabel: String,
     onLogout: () -> Unit,
     /** Dipanggil saat "Ulangi Panduan Aplikasi" diketuk: shell berpindah ke tab Beranda. */
-    onReplayTour: () -> Unit = {}
+    onReplayTour: () -> Unit = {},
+    /** Jika diisi (penghuni), tampil kartu "Ubah data diri". */
+    onEditProfile: (() -> Unit)? = null
 ) {
     var confirm by remember { mutableStateOf(false) }
     val tour = LocalTourController.current
@@ -75,6 +78,20 @@ fun ProfileInfoScreen(
             }
         }
         Spacer(Modifier.height(16.dp))
+
+        if (onEditProfile != null) {
+            AppCard(modifier = Modifier.fillMaxWidth().entrance(1), onClick = onEditProfile) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Edit, contentDescription = null, tint = Green700, modifier = Modifier.padding(end = 12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Ubah Data Diri", style = MaterialTheme.typography.titleSmall, color = Ink900)
+                        Text("Perbarui nama dan nomor HP / WhatsApp", style = MaterialTheme.typography.bodySmall, color = Ink600)
+                    }
+                    Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = Ink400)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
 
         // Card Replay Tutorial / Tour
         AppCard(

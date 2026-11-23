@@ -16,7 +16,8 @@ import androidx.room.RoomDatabase
         RepairReportEntity::class
     ],
     // Versi 2: database lokal kini hanya salinan (cache) dari server; data lama versi 1 dibuang.
-    version = 2,
+    // Versi 3: kolom bukti transfer pada tagihan (salinan dibangun ulang dari server).
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

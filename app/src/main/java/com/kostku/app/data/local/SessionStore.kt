@@ -95,6 +95,12 @@ class SessionStore(context: Context) {
             .apply()
     }
 
+    /** Nama pengguna berubah (mis. penghuni mengubah data diri) tanpa perlu login ulang. */
+    fun updateName(name: String) {
+        if (token().isNullOrBlank()) return
+        prefs.edit().putString(Keys.NAME, name).apply()
+    }
+
     /** Logout: hapus token dan data pengguna, tetapi status panduan tetap disimpan. */
     fun clear() {
         prefs.edit()

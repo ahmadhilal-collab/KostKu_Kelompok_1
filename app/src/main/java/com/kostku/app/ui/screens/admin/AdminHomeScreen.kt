@@ -65,6 +65,7 @@ import com.kostku.app.ui.components.LocalNotifier
 import com.kostku.app.ui.components.LocalTourController
 import com.kostku.app.ui.components.MaintenanceChip
 import com.kostku.app.ui.components.PaymentStatusChip
+import com.kostku.app.ui.components.PaymentStateChip
 import com.kostku.app.ui.components.SectionLabel
 import com.kostku.app.ui.components.SpotlightTarget
 import com.kostku.app.ui.components.adminTourSteps
@@ -78,6 +79,7 @@ import com.kostku.app.ui.theme.Green700
 import com.kostku.app.ui.theme.Ink400
 import com.kostku.app.ui.theme.Ink600
 import com.kostku.app.ui.theme.Ink900
+import com.kostku.app.ui.theme.Warning
 import com.kostku.app.ui.theme.White
 import com.kostku.app.util.Fmt
 import com.kostku.app.util.Intents
@@ -96,6 +98,7 @@ fun AdminHomeScreen(
     appViewModel: AppViewModel = androidx.lifecycle.viewmodel.compose.viewModel(factory = AppViewModel.Factory)
 ) {
     val cards by vm.roomCards.collectAsStateWithLifecycle()
+    val pendingTransfers by vm.pendingTransfers.collectAsStateWithLifecycle()
     val isAdminTourCompleted by appViewModel.isAdminTourCompleted.collectAsStateWithLifecycle()
     val tour = LocalTourController.current
     val gridState = rememberLazyGridState()
@@ -245,6 +248,14 @@ fun AdminHomeScreen(
                     ) { Icon(tile.icon, null, tint = Green700, modifier = Modifier.size(24.dp)) }
                     Spacer(Modifier.height(12.dp))
                     Text(tile.label, style = MaterialTheme.typography.titleSmall, color = Ink900)
+                    // Badge jumlah bukti transfer yang menunggu verifikasi
+                    if (tile.route == AdminRoutes.RECEIPTS && pendingTransfers.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "${pendingTransfers.size} bukti transfer menunggu",
+                            style = MaterialTheme.typography.labelSmall, color = Warning
+                        )
+                    }
                 }
             }
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -326,15 +337,25 @@ private fun RoomSummaryCard(card: RoomCardData, onClick: () -> Unit, onRemind: (
             RoomStatus.OCCUPIED -> {
                 val payment = card.payment
                 val paid = payment?.status == PaymentStatus.PAID
-                PaymentStatusChip(paid)
+                if (payment != null) PaymentStateChip(payment, short = true) else PaymentStatusChip(paid)
                 Spacer(Modifier.height(8.dp))
                 Text(Fmt.rupiah(room.monthlyRate), style = MaterialTheme.typography.titleSmall, color = Ink900)
                 Spacer(Modifier.height(6.dp))
                 if (paid && payment?.paidAt != null) {
                     Text(
-                        "Tunai • ${Fmt.shortDate(payment.paidAt)}",
+                        "${payment.method ?: "Tunai"} • ${Fmt.shortDate(payment.paidAt)}",
                         style = MaterialTheme.typography.bodySmall, color = Ink400
                     )
+                } else if (payment?.isAwaitingVerification == true) {
+                    // Bukti transfer sudah masuk: ketuk kartu untuk memeriksa, tidak perlu diingatkan.
+                    OutlinedButton(
+                        onClick = onClick,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.fillMaxWidth().height(36.dp)
+                    ) {
+                        Text("Periksa bukti", style = MaterialTheme.typography.labelSmall, color = Green700)
+                    }
                 } else {
                     OutlinedButton(
                         onClick = onRemind,

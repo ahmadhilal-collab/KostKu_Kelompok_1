@@ -46,13 +46,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.kostku.app.data.local.PaymentStatus
 import com.kostku.app.data.local.Session
+import com.kostku.app.ui.components.NoticeBox
+import com.kostku.app.ui.components.NoticeTone
+import com.kostku.app.ui.components.PaymentStateChip
 import com.kostku.app.ui.components.AppCard
 import com.kostku.app.ui.components.BrandHeader
 import com.kostku.app.ui.components.ContextualTooltipCard
 import com.kostku.app.ui.components.InteractiveTourDialog
 import com.kostku.app.ui.components.KostKuLogo
 import com.kostku.app.ui.components.LocalTourController
-import com.kostku.app.ui.components.PaymentStatusChip
 import com.kostku.app.ui.components.PrimaryButton
 import com.kostku.app.ui.components.SecondaryButton
 import com.kostku.app.ui.components.SpotlightTarget
@@ -203,7 +205,7 @@ fun TenantHomeScreen(
                         color = Ink900,
                         modifier = Modifier.weight(1f)
                     )
-                    if (current != null) PaymentStatusChip(paid)
+                    if (current != null) PaymentStateChip(current)
                 }
                 Spacer(Modifier.height(12.dp))
                 Text("Total Tagihan All-In", style = MaterialTheme.typography.bodySmall, color = Ink600)
@@ -221,9 +223,35 @@ fun TenantHomeScreen(
                         Spacer(Modifier.width(8.dp))
                         Text("Jatuh Tempo: ${Fmt.date(current.dueDate)}", style = MaterialTheme.typography.bodyMedium, color = Ink900)
                     }
-                    if (paid) {
-                        Spacer(Modifier.height(14.dp))
-                        SecondaryButton("Lihat Nota Pembayaran", { nav.navigate(TenantRoutes.receipt(current.id)) })
+                    when {
+                        paid -> {
+                            Spacer(Modifier.height(14.dp))
+                            SecondaryButton("Lihat Nota Pembayaran", { nav.navigate(TenantRoutes.receipt(current.id)) })
+                        }
+                        current.isAwaitingVerification -> {
+                            Spacer(Modifier.height(14.dp))
+                            NoticeBox(
+                                "Bukti transfer sedang diverifikasi",
+                                "Nota muncul setelah pengelola memastikan dana masuk.",
+                                NoticeTone.INFO
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            SecondaryButton("Lihat Bukti Terkirim", { nav.navigate(TenantRoutes.pay(current.id)) })
+                        }
+                        current.isTransferRejected -> {
+                            Spacer(Modifier.height(14.dp))
+                            NoticeBox(
+                                "Bukti transfer ditolak",
+                                "Alasan: ${current.rejectReason ?: "-"}",
+                                NoticeTone.DANGER
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            PrimaryButton("Kirim Ulang Bukti", { nav.navigate(TenantRoutes.pay(current.id)) })
+                        }
+                        else -> {
+                            Spacer(Modifier.height(14.dp))
+                            PrimaryButton("Bayar Sekarang", { nav.navigate(TenantRoutes.pay(current.id)) })
+                        }
                     }
                 } else {
                     Text("Belum ada tagihan untuk bulan ini.", style = MaterialTheme.typography.bodyMedium, color = Ink600)

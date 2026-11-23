@@ -11,6 +11,7 @@ import com.kostku.app.data.local.RoomPhotoEntity
 import com.kostku.app.data.local.RoomStatus
 import com.kostku.app.data.local.Session
 import com.kostku.app.data.local.TenantEntity
+import com.kostku.app.data.local.TransferStatus
 import com.kostku.app.data.local.UserRole
 import java.time.Instant
 import java.time.LocalDate
@@ -122,7 +123,40 @@ fun PaymentDto.toEntity(receivedBy: String? = null): PaymentEntity = PaymentEnti
     receiptNo = receiptNo,
     receivedBy = receivedBy,
     dueDate = ApiDates.dueToMillis(dueDate) ?: 0L,
-    reminderSentAt = ApiDates.isoToMillis(reminderSentAt)
+    reminderSentAt = ApiDates.isoToMillis(reminderSentAt),
+    transferStatus = enumOf(transferStatus, TransferStatus.NONE),
+    transferNote = transferNote,
+    transferSubmittedAt = ApiDates.isoToMillis(transferSubmittedAt),
+    rejectReason = rejectReason,
+    hasProof = hasProof == true
+)
+
+/** Pengaturan metode pembayaran (rekening tujuan + metode yang aktif). */
+data class PaymentSettings(
+    val transferEnabled: Boolean,
+    val cashEnabled: Boolean,
+    val bankName: String,
+    val accountNumber: String,
+    val accountHolder: String,
+    val transferNote: String
+) {
+    val hasAccount: Boolean get() = bankName.isNotBlank() && accountNumber.isNotBlank()
+
+    fun toDto() = PaymentSettingsDto(transferEnabled, cashEnabled, bankName, accountNumber, accountHolder, transferNote)
+
+    companion object {
+        /** Dipakai sebelum data dari server termuat. */
+        val DEFAULT = PaymentSettings(false, true, "", "", "", "")
+    }
+}
+
+fun PaymentSettingsDto.toModel(): PaymentSettings = PaymentSettings(
+    transferEnabled = transferEnabled,
+    cashEnabled = cashEnabled,
+    bankName = bankName.orEmpty(),
+    accountNumber = accountNumber.orEmpty(),
+    accountHolder = accountHolder.orEmpty(),
+    transferNote = transferNote.orEmpty()
 )
 
 fun AnnouncementDto.toEntity(): AnnouncementEntity = AnnouncementEntity(

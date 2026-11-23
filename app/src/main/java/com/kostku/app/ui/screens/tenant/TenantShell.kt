@@ -61,6 +61,9 @@ object TenantRoutes {
     const val PAYMENTS = "t_payments"
     const val RECEIPT = "t_receipt/{id}"
     fun receipt(id: Long) = "t_receipt/$id"
+    const val PAY = "t_pay/{id}?cash={cash}"
+    fun pay(id: Long, cash: Boolean = false) = "t_pay/$id?cash=$cash"
+    const val PROFILE_EDIT = "t_profile_edit"
 }
 
 private val tenantTabs = listOf(
@@ -73,6 +76,9 @@ private val tenantTabs = listOf(
 fun TenantShell(session: Session, onLogout: () -> Unit) {
     val nav = rememberNavController()
     val vm: TenantViewModel = viewModel(factory = TenantViewModel.factory(session.userId))
+    // Nama di sesi ikut berubah setelah penghuni/pengelola memperbarui data diri.
+    val profile by vm.profile.collectAsStateWithLifecycle()
+    val live = profile?.name?.takeIf { it.isNotBlank() }?.let { session.copy(name = it) } ?: session
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val notify = remember {
@@ -130,18 +136,33 @@ fun TenantShell(session: Session, onLogout: () -> Unit) {
                 popEnterTransition = { fadeIn(tween(260)) },
                 popExitTransition = { fadeOut(tween(160)) + slideOutVertically(tween(200)) { it / 24 } }
             ) {
-                composable(TenantRoutes.HOME) { TenantHomeScreen(vm, session, nav) }
-                composable(TenantRoutes.REPAIR) { TenantRepairScreen(vm, session) }
+                composable(TenantRoutes.HOME) { TenantHomeScreen(vm, live, nav) }
+                composable(TenantRoutes.REPAIR) { TenantRepairScreen(vm, live) }
                 composable(TenantRoutes.PROFILE) {
                     ProfileInfoScreen(
-                        session = session,
+                        session = live,
                         roleLabel = "Penghuni",
                         onLogout = onLogout,
-                        onReplayTour = { nav.navigateTab(TenantRoutes.HOME, TenantRoutes.HOME) }
+                        onReplayTour = { nav.navigateTab(TenantRoutes.HOME, TenantRoutes.HOME) },
+                        onEditProfile = { nav.navigate(TenantRoutes.PROFILE_EDIT) }
                     )
                 }
-                composable(TenantRoutes.NOTICE) { NoticeScreen(vm, session, nav) }
-                composable(TenantRoutes.PAYMENTS) { PaymentsScreen(vm, session, nav) }
+                composable(TenantRoutes.NOTICE) { NoticeScreen(vm, live, nav) }
+                composable(TenantRoutes.PAYMENTS) { PaymentsScreen(vm, live, nav) }
+                composable(
+                    TenantRoutes.PAY,
+                    arguments = listOf(
+                        navArgument("id") { type = NavType.LongType },
+                        navArgument("cash") { type = NavType.BoolType; defaultValue = false }
+                    )
+                ) {
+                    PayScreen(
+                        paymentId = it.arguments?.getLong("id") ?: -1L,
+                        startWithCash = it.arguments?.getBoolean("cash") ?: false,
+                        vm = vm, session = live, nav = nav
+                    )
+                }
+                composable(TenantRoutes.PROFILE_EDIT) { ProfileEditScreen(vm, nav) }
                 composable(
                     TenantRoutes.RECEIPT,
                     arguments = listOf(navArgument("id") { type = NavType.LongType })

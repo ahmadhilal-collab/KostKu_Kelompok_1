@@ -33,5 +33,5 @@ class AppContainer(context: Context, val appScope: CoroutineScope) {
         database = database,
         pushRepository = pushRepository
     )
-    val kostRepository: KostRepository = KostRepository(database, apiClient)
+    val kostRepository: KostRepository = KostRepository(database, apiClient, sessionStore)
 }
